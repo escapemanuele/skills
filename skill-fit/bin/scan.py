@@ -423,6 +423,34 @@ def tool_uses_from_assistant(message) -> list[dict]:
 SAMPLE_CMD_MAX_LEN = 200
 SAMPLES_PER_VERB = 5
 
+# --- Coaching detectors (deterministic, no LLM) -----------------------------
+# Bash verbs whose job a native Claude tool does better/structured. Heavy use
+# of these usually means the session reached for the shell instead of the tool.
+SEARCH_READ_BYPASS = {
+    "grep": "Grep",
+    "rg": "Grep",
+    "find": "Glob",
+    "cat": "Read",
+    "head": "Read",
+    "tail": "Read",
+    "sed": "Read/Edit",
+    "awk": "Read/Grep",
+}
+
+# Risky commands worth flagging if they appear without an obvious safety net.
+# Each pattern -> short human label. Matched case-insensitively on the full cmd.
+DESTRUCTIVE_PATTERNS = [
+    (re.compile(r"\bgit\s+push\s+(?:[^|&;]*\s)?(?:--force(?!-with-lease)|-f)\b"), "git push --force"),
+    (re.compile(r"\bgit\s+reset\s+--hard\b"), "git reset --hard"),
+    # git clean with -f and -d in either order (each branch anchored to `git clean`)
+    (re.compile(r"\bgit\s+clean\s+-\w*f\w*d\w*\b|\bgit\s+clean\s+-\w*d\w*f\w*\b"), "git clean -fd"),
+    (re.compile(r"--no-verify\b"), "--no-verify (skips hooks)"),
+    # rm with -r and -f in either order (each branch anchored to `rm`)
+    (re.compile(r"\brm\s+-\w*r\w*f\w*\b|\brm\s+-\w*f\w*r\w*\b"), "rm -rf"),
+]
+
+CURL_HOST_RE = re.compile(r"\b(?:curl|wget)\b[^|&;]*?https?://([^/\s'\"]+)", re.IGNORECASE)
+
 
 def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
     sessions = []
@@ -437,6 +465,14 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
 
     project_counts = collections.Counter()
 
+    # --- coaching signals ---
+    total_bash = 0
+    bypass_calls = collections.Counter()       # native-tool bypass verbs
+    destructive = collections.Counter()        # label -> count
+    destructive_samples: dict[str, str] = {}   # label -> one real command
+    curl_hosts = collections.Counter()         # host -> count
+    project_cwd: dict[str, str] = {}           # project dir name -> real cwd
+
     for project, path, mtime in iter_session_files(root, max_age_days):
         session_user_msgs = 0
         session_bash = 0
@@ -447,6 +483,12 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                         ev = json.loads(line)
                     except Exception:
                         continue
+                    # Capture the real working directory once per project (events
+                    # carry an absolute `cwd`); used later for CLAUDE.md checks.
+                    if project not in project_cwd:
+                        cwd_val = ev.get("cwd")
+                        if isinstance(cwd_val, str) and cwd_val:
+                            project_cwd[project] = cwd_val
                     typ = ev.get("type")
                     if typ == "user":
                         msg = ev.get("message") or {}
@@ -462,6 +504,7 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                             tool_uses[name] += 1
                             if name == "Bash":
                                 session_bash += 1
+                                total_bash += 1
                                 cmd = (tu.get("input") or {}).get("command", "")
                                 verb = extract_bash_verb(cmd)
                                 if verb:
@@ -472,6 +515,22 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                                         if normalized and normalized not in bash_verb_sample_seen[verb]:
                                             bash_verb_samples[verb].append(normalized)
                                             bash_verb_sample_seen[verb].add(normalized)
+                                    # Native-tool bypass: count the base verb only
+                                    base = verb.split()[0]
+                                    if base in SEARCH_READ_BYPASS:
+                                        bypass_calls[base] += 1
+                                # Destructive command patterns (match full cmd)
+                                for pat, label in DESTRUCTIVE_PATTERNS:
+                                    if pat.search(cmd):
+                                        destructive[label] += 1
+                                        destructive_samples.setdefault(
+                                            label,
+                                            re.sub(r"\s+", " ", cmd.strip())[:SAMPLE_CMD_MAX_LEN],
+                                        )
+                                # Raw HTTP against a host (curl/wget)
+                                m = CURL_HOST_RE.search(cmd)
+                                if m:
+                                    curl_hosts[m.group(1)] += 1
                             elif name == "WebFetch":
                                 web_fetches += 1
                             elif name.startswith("mcp__"):
@@ -505,6 +564,52 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
     ][:30]
 
     installed = discover_installed(cwd or Path.cwd())
+
+    # --- Build coaching signals (deterministic; Claude turns these into advice) ---
+    # Hot repos missing a CLAUDE.md: git repos with >=3 sessions whose real cwd
+    # exists on disk but has no CLAUDE.md (so context gets re-explained each run).
+    # Require a .git dir so we only flag actual repos, not parent/home dirs.
+    hot_repos_no_claudemd = []
+    for proj, n in project_counts.most_common():
+        if n < 3:
+            continue
+        real = project_cwd.get(proj)
+        if not real:
+            continue
+        p = Path(real)
+        try:
+            if not (p.is_dir() and (p / ".git").exists()):
+                continue
+            if not (p / "CLAUDE.md").exists():
+                hot_repos_no_claudemd.append({"path": real, "sessions": n})
+        except OSError:
+            continue
+    hot_repos_no_claudemd = hot_repos_no_claudemd[:8]
+
+    native_native_use = {
+        t: tool_uses.get(t, 0) for t in ("Grep", "Glob", "Read")
+    }
+    coaching_signals = {
+        # Native-tool bypass: shell verbs that duplicate a Claude tool.
+        "native_tool_bypass": {
+            "bash_total": total_bash,
+            "bypass_calls": dict(bypass_calls.most_common()),
+            "bypass_total": sum(bypass_calls.values()),
+            "suggested_tool": {v: SEARCH_READ_BYPASS[v] for v in bypass_calls},
+            "native_tool_use": native_native_use,
+        },
+        # Risky commands seen (with one real sample each).
+        "destructive_cmds": [
+            {"label": lbl, "count": destructive[lbl], "sample": destructive_samples.get(lbl, "")}
+            for lbl, _ in destructive.most_common()
+        ],
+        # Raw HTTP to hosts that may have a dedicated CLI/MCP.
+        "raw_http_hosts": dict(curl_hosts.most_common(10)),
+        # Foreground sleeps usually mean polling instead of a proper wait.
+        "sleep_calls": bash_verbs.get("sleep", 0),
+        # Hot repos with no CLAUDE.md (context re-explained each session).
+        "hot_repos_without_claudemd": hot_repos_no_claudemd,
+    }
 
     # Catalog probing is expensive (cold path can run ~1 min on machines with
     # many CLI providers). Cache to ~/.claude/skills/skill-fit/.catalogs-cache.json
@@ -541,6 +646,7 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
         "installed_plugins": installed["plugins"],
         "available_catalogs": catalogs,
         "ignored_names": load_ignored(),
+        "coaching_signals": coaching_signals,
     }
 
     serialized = json.dumps(summary)
