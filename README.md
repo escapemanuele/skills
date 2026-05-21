@@ -58,4 +58,4 @@ skills/
 
 ## License
 
-TBD
+MIT
