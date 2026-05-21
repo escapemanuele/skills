@@ -180,6 +180,21 @@ def discover_catalogs() -> list[dict]:
                             }
                         )
 
+    # skills.sh — the public open skills registry, reachable via the `skills`
+    # CLI run through `npx`. We only require `npx` to be present; the package
+    # is fetched on demand. This is the largest catalog by far, so add it
+    # whenever Node/npx is available.
+    if shutil.which("npx"):
+        catalogs.append(
+            {
+                "name": "skills.sh",
+                "type": "cli-registry",
+                "tool": "npx skills find",
+                "install_tool": "npx skills add",
+                "init_tool": "npx skills init",
+            }
+        )
+
     return catalogs
 
 

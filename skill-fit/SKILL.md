@@ -37,7 +37,7 @@ The JSON includes:
 - **Evidence fields:** `session_count`, `projects`, `tool_use_top`, `mcp_calls_top`, `bash_verbs_top`, `bash_verb_samples`, `web_fetches`, `recurring_prompts`, `sampled_oneoff_prompts`, `session_index`. Use these as evidence in the report — every claim about how many times the user did X must come from this JSON.
 - **`bash_verb_samples`** maps a verb to up to 5 real command lines the user ran. Use it whenever a top verb is ambiguous (`node`, `curl`, `python3`, `for`, `cd`) — the samples reveal the actual workflow. Quote them in the Evidence line when they sharpen the job tag.
 - **Filter fields:** `installed_skills` (list of skill `name:` values found locally), `installed_plugins` (list of plugin names from `installed_plugins.json`), `ignored_names` (user-dismissed names from `~/.claude/skills/skill-fit/.ignored.json`). Use these to **skip recommending anything already installed or explicitly dismissed**. If a search result's `name` or `slug` matches anything in `installed_skills`, `installed_plugins`, or `ignored_names`, drop it.
-- **Catalog fields:** `available_catalogs` (list of catalog sources reachable in this env). Each entry has `name`, `type` (`marketplace` or `cli-provider`), and either `marketplace_json` (path to a local JSON index) or `tool` (CLI command like `wp context <provider>`). Query every catalog in the list — never hardcode one.
+- **Catalog fields:** `available_catalogs` (list of catalog sources reachable in this env). Each entry has `name`, `type` (`marketplace`, `cli-provider`, or `cli-registry`), and either `marketplace_json` (path to a local JSON index) or `tool` (CLI command like `wp context <provider>` or `npx skills find`). The `cli-registry` entry (skills.sh) also carries `install_tool` (`npx skills add`) and `init_tool` (`npx skills init`). Query every catalog in the list — never hardcode one.
 
 If `session_count` is 0, stop and tell the user there's no recent session data to analyze.
 
@@ -79,17 +79,25 @@ Loop over **every entry** in `available_catalogs` from the scan JSON. Different 
 - Search: `<tool> search query=<term> limit=10`. Use the `tool` field from the catalog entry verbatim.
 - These catalogs typically aggregate from many upstream repos and return entries with `name`, `slug`, `type`, `description`, `repo_key`, `source_url`.
 
-If `available_catalogs` is empty, stop and tell the user: *"No skill catalogs reachable. Add at least one marketplace (e.g. `/plugin marketplace add anthropics/claude-plugins-official`) and try again."*
+**CLI-registry catalog** (`type: "cli-registry"`, the public skills.sh registry, `tool: "npx skills find"`):
+- Search: `npx skills find <term>` (the `tool` field verbatim, then the noun-phrase). This is the largest catalog — query it for every job.
+- Results carry the skill name, owner/repo, a description, **install count**, and **GitHub stars** of the source repo. Capture those numbers — they drive the quality ranking in the "Combine results" step below.
+- First call in a session may be slow (npx fetches the package); subsequent calls are fast.
+
+If `available_catalogs` is empty, stop and tell the user: *"No skill catalogs reachable. Add at least one marketplace (e.g. `/plugin marketplace add anthropics/claude-plugins-official`) or install Node so `npx skills` works, then try again."*
 
 ### Combine results across catalogs
 
 For each job, merge candidates from every catalog:
-- **Dedupe by name** — if the same plugin or skill shows up in more than one catalog, keep one entry. Prefer the CLI-provider version when present, because its descriptions are typically richer and its `get` tool returns the real SKILL.md.
+- **Dedupe by name** — if the same plugin or skill shows up in more than one catalog, keep one entry. Prefer the skills.sh entry when present (it carries install counts + stars for ranking), then the CLI-provider version (richer descriptions, `get` returns the real SKILL.md), then the marketplace entry.
 - **Pick ONE winner per job** using these priorities:
   1. Drop anything already installed (cross-check `installed_skills` and `installed_plugins`) or in `ignored_names`.
-  2. Entries from "blessed" repos — typically marketplaces under the upstream tool vendor (e.g. `anthropics/claude-plugins-official`) or the user's own organization — over personal or experimental ones.
-  3. Entries that explicitly describe the job (don't settle for "kinda fits").
-  4. Richer descriptions / newer entries over terse / old.
+  2. Entries that explicitly describe the job (don't settle for "kinda fits").
+  3. **Use hard popularity numbers as the tie-breaker, when the catalog reports them** (skills.sh does):
+     - **Install count:** 1K+ installs = solid signal, recommend with confidence. Under 100 installs = treat with caution and say so in the Evidence line. Prefer the higher-install entry between two comparable matches.
+     - **GitHub stars of the source repo:** a source repo with under 100 stars should be treated with skepticism — drop the confidence dot or flag it.
+     - **Official / blessed sources** (`anthropics`, `vercel-labs`, the upstream tool vendor, or the user's own org) outrank unknown personal authors.
+  4. If the catalog reports **no** install/star numbers (e.g. local marketplaces, cli-providers), fall back to: blessed source > richer description > newer entry. **Do not penalize an entry for lacking install counts** — only compare numbers between entries that both have them.
 
 If nothing clearly matches a job, it goes to the **gaps section** — don't force a recommendation.
 
@@ -100,11 +108,13 @@ If nothing clearly matches a job, it goes to the **gaps section** — don't forc
 For each recommendation, fetch its full content so the install command and trigger phrases are real, not paraphrased:
 
 - **CLI-provider hit:** `<tool> get slug=<slug> repo_key=<repo_key>` (using the `tool` field from the catalog entry) — returns the full SKILL.md.
+- **skills.sh hit:** the `npx skills find` result already carries name, description, install count, and stars. That's enough to recommend; no extra fetch needed. If you want the full SKILL.md before recommending, the source is `https://www.skills.sh/<owner>/<repo>/<skill>`.
 - **Marketplace hit:** read the entry directly from the `marketplace_json` file (already in memory from Step 3). If the plugin is cached locally at `~/.claude/plugins/marketplaces/<mp>/<plugin>/`, also read its `README.md` or the bundled `SKILL.md` for richer detail.
 
 The install command rules:
+- **skills.sh registry hit** (came from `npx skills find`): `npx skills add <owner/repo>@<skill> -g -y`. `-g` installs at user level, `-y` skips the confirm prompt. This is the preferred recipe for any skills.sh result — don't fall back to manual clone for these.
 - **Plugin in a marketplace:** `/plugin install <name>@<marketplace>`. If the marketplace isn't yet added on the user's machine, prepend `/plugin marketplace add <source>` (the source comes from `known_marketplaces.json` or, for unknown ones, from the entry's `repo_key`).
-- **Standalone skill:** clone the repo + copy the skill dir into `~/.claude/skills/<name>/`.
+- **Standalone skill (no skills.sh entry):** clone the repo + copy the skill dir into `~/.claude/skills/<name>/`.
 
 If `get` fails for a CLI-provider pick, fall back to the search description and flag the install as `Install: see source_url` so the user knows it's unverified.
 
@@ -141,11 +151,11 @@ Catalogs queried: <comma-separated list of `available_catalogs[*].name`>.
 
 ## ○○○ Gaps — workflows worth authoring
 
-- **<job tag>** — <one-line: evidence + why no catalog match>
-- **<job tag>** — <one-line: evidence + why no catalog match>
+- **<job tag>** — <one-line: evidence + why no catalog match>. Start one: `npx skills init <name>`
+- **<job tag>** — <one-line: evidence + why no catalog match>. Start one: `npx skills init <name>`
 ```
 
-**Gaps** are in their own list below the numbered recommendations. Each is a one-line bullet (no Evidence/Install/Confidence blocks). The `○○○` lives in the section heading, not on each bullet, so the eye scans the list as a clean group.
+**Gaps** are in their own list below the numbered recommendations. Each is a one-line bullet (no Evidence/Install/Confidence blocks) ending with a `npx skills init <name>` scaffold command so the gap is actionable, not just named. The `○○○` lives in the section heading, not on each bullet, so the eye scans the list as a clean group. Only append the `npx skills init` command when skills.sh is in `available_catalogs` (i.e. `npx` is present); otherwise leave the bullet as a plain description.
 
 ### Links: table only
 
