@@ -198,6 +198,71 @@ def discover_catalogs() -> list[dict]:
     return catalogs
 
 
+def discover_mcp_servers(cwd: Path) -> list[dict]:
+    """Find configured MCP servers that may expose a skill/plugin catalog.
+
+    The scanner runs as a plain subprocess and CANNOT call MCP tools — only
+    the live Claude session can. So we can't *probe* an MCP server here. What
+    we can do is read the MCP config files, list the configured servers, and
+    emit each as an `mcp-server` catalog candidate. SKILL.md then tells Claude
+    (which does have MCP access) to enumerate each server's providers/tools and
+    keep the ones that look like a catalog (a `search`+`get` pair with a
+    catalog-flavored description, e.g. context-a8c's `ai-skills`).
+
+    Sources, in order: global `~/.claude.json` top-level `mcpServers`, plus the
+    current project's `mcpServers` block in the same file, plus a project-local
+    `.mcp.json`. Server names are deduped.
+    """
+    seen: set[str] = set()
+    servers: list[dict] = []
+
+    def _add(names):
+        for n in names:
+            if n and n not in seen:
+                seen.add(n)
+                servers.append(
+                    {
+                        "name": n,
+                        "type": "mcp-server",
+                        "probe": (
+                            "Claude-side only: load/enumerate this server's "
+                            "providers and tools; treat any provider exposing a "
+                            "search+get pair with a catalog-flavored description "
+                            "(skill/plugin/agent/marketplace/directory/catalog) "
+                            "as a catalog and query it in Step 3."
+                        ),
+                    }
+                )
+
+    home = Path.home()
+    claude_json = home / ".claude.json"
+    if claude_json.is_file():
+        try:
+            data = json.loads(claude_json.read_text())
+        except Exception:
+            data = {}
+        # Global servers
+        if isinstance(data.get("mcpServers"), dict):
+            _add(data["mcpServers"].keys())
+        # Current project's servers
+        projects = data.get("projects") or {}
+        proj = projects.get(str(cwd))
+        if isinstance(proj, dict) and isinstance(proj.get("mcpServers"), dict):
+            _add(proj["mcpServers"].keys())
+
+    # Project-local .mcp.json
+    mcp_json = cwd / ".mcp.json"
+    if mcp_json.is_file():
+        try:
+            data = json.loads(mcp_json.read_text())
+            if isinstance(data.get("mcpServers"), dict):
+                _add(data["mcpServers"].keys())
+        except Exception:
+            pass
+
+    return servers
+
+
 def load_cached_catalogs(cache_path: Path, max_age_seconds: int) -> list[dict] | None:
     """Return cached catalog list if fresh, else None."""
     try:
@@ -449,6 +514,11 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
     if catalogs is None:
         catalogs = discover_catalogs()
         save_cached_catalogs(cache, catalogs)
+
+    # MCP-server catalog candidates are discovered from config files (cheap, no
+    # probing) and depend on cwd, so compute them fresh each run rather than
+    # caching. The live Claude session probes them — the scanner cannot.
+    catalogs = catalogs + discover_mcp_servers(cwd or Path.cwd())
 
     summary = {
         "scanned_root": str(root),
