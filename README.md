@@ -22,6 +22,14 @@ The scan itself is deterministic (no LLM): `skill-fit/bin/scan.py` produces hard
 
 ## Install
 
+Via [skills.sh](https://www.skills.sh):
+
+```bash
+npx skills@latest add escapemanuele/skills
+```
+
+Or manually:
+
 ```bash
 git clone https://github.com/escapemanuele/skills.git /tmp/eb-skills
 cp -r /tmp/eb-skills/skill-fit ~/.claude/skills/skill-fit
@@ -50,4 +58,4 @@ skills/
 
 ## License
 
-TBD
+MIT
