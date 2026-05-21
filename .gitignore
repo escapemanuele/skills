@@ -1,0 +1,7 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# skill-fit runtime state (user-local, not repo content)
+.catalogs-cache.json
+.ignored.json
