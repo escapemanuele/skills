@@ -137,6 +137,8 @@ Use this exact template. Keep it scannable. Be specific. Be honest.
 ```
 # Your skill fit — last 14 days
 
+📊 **Visual report:** <file:// URL printed by render_report.py> *(open in a browser)*
+
 Scanned **N sessions** across **M projects**.
 Catalogs queried: <comma-separated list of `available_catalogs[*].name`>.
 
@@ -225,6 +227,25 @@ Build coaching points from these signals (skip any that don't clear the threshol
 - Mark confidence honestly — *"low"* is fine and trustworthy.
 - No more than 5 recommended skills total. No more than 3 gap entries. No more than 3 coaching points.
 - **Evidence-bound coaching is in scope** — calling out a habit ("214 raw `grep`/`find`/`cat` calls — the native Grep/Glob/Read tools are faster") is exactly the teacher role, *as long as it cites a count*. What's still out of bounds is **count-free editorializing** ("you should review PRs less often") — opinions with no number behind them.
+
+## Step 6 — Render the HTML companion
+
+After the markdown report is written, generate a self-contained visual version and link it at the top.
+
+1. **Assemble a payload JSON** from the analysis you just produced plus the deterministic counts from the scan. Schema (see `bin/render_report.py` docstring for the authoritative version):
+   - `meta`: `{days, sessions, projects, date, catalogs}` (date = today, ISO).
+   - `recommendations`: one object per rec — `{rank, confidence: "high"|"med"|"low", type, name, job, evidence, description, install: [cmds], source_url}`.
+   - `gaps`: `[{tag, note, init}]`.
+   - `coaching`: `[{title, evidence, costs, better}]`.
+   - `charts`: lift straight from the scan JSON — `tool_use_top`, `bash_verbs_top`, and `native_bypass: {bypass_total, native_total: <Grep+Glob+Read>, bypass_calls}` from `coaching_signals.native_tool_bypass`.
+2. **Write the payload** to a temp file and run the renderer:
+   ```bash
+   python3 ~/.claude/skills/skill-fit/bin/render_report.py /tmp/skill-fit-payload.json
+   ```
+   (If invoked as a plugin, prefer `"$CLAUDE_PLUGIN_ROOT/bin/render_report.py"`.) It writes `~/.claude/skills/skill-fit/reports/skill-fit-<date>.html` and prints `{"path","url"}` as JSON.
+3. **Link it at the very top** of the markdown report using the printed `url` (a `file://` URL the user opens in a browser). If rendering fails for any reason, skip the link silently — the markdown report stands on its own.
+
+The HTML is fully self-contained (inline CSS + inline SVG charts, no network) so it opens offline and nothing leaves the machine.
 
 ## Failure modes to watch for
 

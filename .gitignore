@@ -5,3 +5,5 @@ __pycache__/
 # skill-fit runtime state (user-local, not repo content)
 .catalogs-cache.json
 .ignored.json
+reports/
+skill-fit-*.html
