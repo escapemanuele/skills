@@ -143,9 +143,79 @@ def coach_card(c: dict) -> str:
     return (
         '<div class="card coach">'
         f'<h4>{esc(c.get("title", ""))}</h4>'
-        f'<p><span class="tag ev-t">Evidence</span> {esc(c.get("evidence", ""))}</p>'
-        f'<p><span class="tag cost-t">Costs you</span> {esc(c.get("costs", ""))}</p>'
-        f'<p><span class="tag best-t">Better</span> {esc(c.get("better", ""))}</p>'
+        f'<p><span class="tag ev-t">What we saw</span> {esc(c.get("evidence", ""))}</p>'
+        f'<p><span class="tag cost-t">Why it matters</span> {esc(c.get("costs", ""))}</p>'
+        f'<p><span class="tag best-t">Try this</span> {esc(c.get("better", ""))}</p>'
+        '</div>'
+    )
+
+
+def fmt_tokens(n: int) -> str:
+    """Human-readable token count: 12_400_000 -> '12.4M'."""
+    n = int(n or 0)
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
+
+def usage_card(u: dict) -> str:
+    """Token totals + approximate cost + per-model bar."""
+    if not u:
+        return ""
+    t = u.get("totals", {})
+    in_tok = (t.get("input", 0) or 0) + (t.get("cache_read", 0) or 0) + (t.get("cache_write", 0) or 0)
+    out_tok = t.get("output", 0) or 0
+    cost = u.get("est_cost_usd_total")
+    by_model = {m: (v.get("est_cost_usd") or 0) for m, v in (u.get("by_model") or {}).items()}
+    bars = bar_chart(by_model, "Est. cost by model ($)", top=6, color="#7c3aed") if any(by_model.values()) else ""
+    cost_str = f"~${cost:,.0f}" if cost else "—"
+    return (
+        '<div class="card usage">'
+        '<div class="bignums">'
+        f'<div class="bn"><b>{esc(fmt_tokens(in_tok))}</b><span>tokens in (incl. cache)</span></div>'
+        f'<div class="bn"><b>{esc(fmt_tokens(out_tok))}</b><span>tokens out</span></div>'
+        f'<div class="bn"><b>{esc(cost_str)}</b><span>est. cost</span></div>'
+        '</div>'
+        f'<p class="cap">Approximate, priced {esc(u.get("pricing_as_of", "?"))}. '
+        'Cache reads are large and cheap — normal.</p>'
+        f'{bars}'
+        '</div>'
+    )
+
+
+KIND_ICON = {"dev": "⚙", "writing": "✍", "data": "▦", "ops": "◷", "other": "•"}
+
+
+def recap_strip(w: dict) -> str:
+    """Top projects (kind-tagged) + a work-mix bar."""
+    if not w:
+        return ""
+    import os
+    rows = []
+    for p in (w.get("top_projects") or [])[:5]:
+        path = p.get("path", "")
+        name = os.path.basename(path.rstrip("/")) or path
+        kind = p.get("kind", "other")
+        icon = KIND_ICON.get(kind, "•")
+        rows.append(
+            f'<tr><td>{icon} {esc(name)}</td><td class="num">{esc(p.get("sessions", 0))}</td>'
+            f'<td class="num">{esc(fmt_tokens(p.get("tokens", 0)))}</td>'
+            f'<td><span class="kind k-{esc(kind)}">{esc(kind)}</span></td></tr>'
+        )
+    mix = w.get("mix") or {}
+    mix_bar = "".join(
+        f'<span class="seg k-{esc(k)}" style="width:{v}%" title="{esc(k)} {v}%"></span>'
+        for k, v in mix.items() if v
+    )
+    mix_legend = " · ".join(f'{esc(k)} {v}%' for k, v in mix.items() if v)
+    return (
+        '<div class="card recap">'
+        f'<div class="mixbar">{mix_bar}</div><p class="cap">{esc(mix_legend)}</p>'
+        '<table class="rt"><thead><tr><th>Project</th><th class="num">Sessions</th>'
+        '<th class="num">Tokens</th><th>Focus</th></tr></thead><tbody>'
+        f'{"".join(rows)}</tbody></table>'
         '</div>'
     )
 
@@ -205,6 +275,23 @@ ul.gaps code{display:inline-block;margin-top:6px}
 .bl{font-size:12px;fill:%(INK)s}.bv{font-size:12px;fill:%(MUTED)s}
 .dn{font-size:30px;font-weight:700;fill:%(INK)s}.dl{font-size:11px;fill:%(MUTED)s}
 .cap{font-size:12px;color:%(MUTED)s;margin:10px 0 0;text-align:center}
+.bignums{display:flex;gap:36px;flex-wrap:wrap}
+.bignums .bn b{font-size:30px;display:block;line-height:1.1;color:%(INK)s}
+.bignums .bn span{font-size:12px;color:%(MUTED)s}
+.recap .mixbar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:%(GAP)s}
+.recap .seg{height:100%%;display:inline-block}
+.recap .seg.k-dev{background:#6366f1}.recap .seg.k-writing{background:#10b981}
+.recap .seg.k-data{background:#f59e0b}.recap .seg.k-ops{background:#ec4899}
+.recap .seg.k-other{background:#9ca3af}
+table.rt{width:100%%;border-collapse:collapse;margin-top:14px;font-size:14px}
+table.rt th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+  color:%(MUTED)s;border-bottom:1px solid %(GAP)s;padding:6px 8px}
+table.rt td{padding:7px 8px;border-bottom:1px solid #f1f2f5}
+table.rt td.num,table.rt th.num{text-align:right;font-variant-numeric:tabular-nums}
+.kind{font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;text-transform:uppercase}
+.kind.k-dev{background:#eef2ff;color:#4f46e5}.kind.k-writing{background:#ecfdf5;color:#059669}
+.kind.k-data{background:#fffbeb;color:#d97706}.kind.k-ops{background:#fdf2f8;color:#db2777}
+.kind.k-other{background:#f3f4f6;color:#6b7280}
 footer{margin-top:40px;color:%(MUTED)s;font-size:12px;text-align:center}
 """ % {
     "INK": INK, "ACCENT": ACCENT, "ACCENT_SOFT": ACCENT_SOFT,
@@ -218,6 +305,8 @@ def render(payload: dict) -> str:
     gaps = payload.get("gaps", [])
     coaching = payload.get("coaching", [])
     charts = payload.get("charts", {})
+    usage = payload.get("usage", {})
+    work_recap = payload.get("work_recap", {})
 
     badges = "".join(
         f'<span class="badge">{esc(c)}</span>' for c in m.get("catalogs", [])
@@ -249,6 +338,15 @@ def render(payload: dict) -> str:
         if chart_blocks else ""
     )
 
+    recap_html = (
+        '<h2 class="sec">What you\'ve been working on</h2>' + recap_strip(work_recap)
+        if work_recap.get("top_projects") else ""
+    )
+    usage_html = (
+        '<h2 class="sec">Usage &amp; cost</h2>' + usage_card(usage)
+        if usage.get("totals") else ""
+    )
+
     recs_html = (
         '<h2 class="sec">Recommendations</h2>' + "".join(rec_card(r) for r in recs)
         if recs else ""
@@ -268,7 +366,7 @@ def render(payload: dict) -> str:
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         "<title>skills-daimon report</title><style>" + CSS + "</style></head><body>"
-        '<div class="wrap">' + hero + charts_html + recs_html + gaps_html + coach_html
+        '<div class="wrap">' + hero + recap_html + usage_html + charts_html + recs_html + gaps_html + coach_html
         + '<footer>Generated by skills-daimon · evidence from your own Claude Code sessions · '
           'no data left this machine</footer>'
         "</div></body></html>"

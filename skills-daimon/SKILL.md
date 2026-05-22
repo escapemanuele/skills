@@ -25,10 +25,10 @@ Skip if the user asks for general advice on a specific task — that's not what 
 
 ## Step 1 — Scan the user's sessions (hard counts, no LLM)
 
-Run the bundled scanner. It reads `~/.claude/projects/*/*.jsonl`, filters to the last 14 days by default, and emits a single JSON blob with deterministic counts:
+Run the bundled scanner. It reads `~/.claude/projects/*/*.jsonl`, filters to the last 4 weeks (28 days) by default, and emits a single JSON blob with deterministic counts:
 
 ```bash
-python3 ~/.claude/skills/skills-daimon/bin/scan.py --days 14
+python3 ~/.claude/skills/skills-daimon/bin/scan.py --days 28
 ```
 
 (If invoked as a plugin and `$CLAUDE_PLUGIN_ROOT` is set, prefer `"$CLAUDE_PLUGIN_ROOT/bin/scan.py"`.)
@@ -44,6 +44,8 @@ The JSON includes:
   - `raw_http_hosts` — `{host: count}` for hosts hit by raw `curl`/`wget`. A host with a dedicated CLI/MCP (e.g. `teamcity.a8c.com`) is a coaching opportunity.
   - `sleep_calls` — count of foreground `sleep` calls (often polling that a proper wait/background job would replace).
   - `hot_repos_without_claudemd` — `[{path, sessions}]` for git repos with ≥3 sessions and no `CLAUDE.md` (context re-explained each session).
+- **Usage field:** `usage` — token totals and approximate cost over the window. `{pricing_as_of, days, totals:{input,output,cache_write,cache_read}, by_model:{<model>:{...tokens, est_cost_usd}}, est_cost_usd_total, uncosted_models}`. Cost is computed from a hardcoded per-model price table — **always present it as approximate and cite `pricing_as_of`.** `cache_read` tokens usually dwarf raw input (that's normal and cheap); don't alarm the user about raw token counts without the cache context.
+- **Work-recap field:** `work_recap` — `{top_projects:[{path, sessions, tokens, kind, branch}], mix:{dev,writing,data,ops}}`. `kind` is the dominant signal per project (dev / writing / data / ops); `mix` is the rough percentage split across the window. Use this to describe **what** the user works on and to **weight which recommendations surface first** (see Step 2).
 
 If `session_count` is 0, stop and tell the user there's no recent session data to analyze.
 
@@ -69,6 +71,8 @@ Read the JSON. Identify 3–5 distinct "jobs" the user keeps doing. Lean on:
 For each job, write a short tag (e.g. *"PR review by hand"*, *"Linear triage"*, *"Codebase grep tours"*) and **the concrete evidence count** that justifies it.
 
 Aim for high-signal jobs only. If you can't tie a "job" to specific counts from the JSON, drop it.
+
+**Weight jobs by `work_recap`.** The area where the user spends the most time/tokens should bias which jobs (and therefore recommendations) surface first. If `work_recap.mix` is, say, 60% dev / 33% writing, lead with dev jobs but don't ignore the writing third. If the top projects are non-dev (journal, ops, data), the recommendations should serve *that* work — skills-daimon is not a dev-only tool.
 
 ## Step 3 — For each job, query every available catalog
 
@@ -135,12 +139,28 @@ If `get` fails for a CLI-provider pick, fall back to the search description and 
 Use this exact template. Keep it scannable. Be specific. Be honest.
 
 ```
-# Your skill fit — last 14 days
+# Your skill fit — last 4 weeks
 
 📊 **Visual report:** <file:// URL printed by render_report.py> *(open in a browser)*
 
 Scanned **N sessions** across **M projects**.
 Catalogs queried: <comma-separated list of `available_catalogs[*].name`>.
+
+## What you've been working on
+
+<One-line read of `work_recap.mix`, e.g. "Mostly dev (61%) with a big writing streak (33%) — some data and ops.">
+
+| Project | Sessions | Focus |
+|---|---|---|
+| <basename of path> | <sessions> | <kind> |
+
+(Top 3–5 from `work_recap.top_projects`. Use the path basename, not the full path. This frames the rest of the report — the recommendations below serve this work.)
+
+## Usage & cost (last 4 weeks)
+
+**<totals.input + cache>** in · **<totals.output>** out · **~$<est_cost_usd_total>** *(approximate, priced <pricing_as_of>)*
+
+<If more than one model in `by_model`, one line naming the heaviest, e.g. "Mostly claude-opus-4-7.">. Note `cache_read` tokens are large and cheap — normal, not a problem.
 
 ## TL;DR — recommendations
 
@@ -171,9 +191,9 @@ Catalogs queried: <comma-separated list of `available_catalogs[*].name`>.
 ## ⚑ Habits & leverage — coaching
 
 ### <habit tag>
-**Evidence:** <hard count + one real command/sample from `coaching_signals`, e.g. "ran raw `grep`/`find`/`cat` 214× vs Grep/Glob/Read 864× — a fifth of your shell calls reach past the native tools">.
-**Costs you:** <one line — why the current way is slower / riskier / repetitive>.
-**Better:** <one concrete fix: the tool, command, or pattern to use instead>.
+**What we saw:** <hard count, plainly, e.g. "You ran `grep`/`find`/`cat` in the shell 214 times. The built-in search tools did the same job 864 times.">.
+**Why it matters:** <one short, plain sentence — no jargon. e.g. "Shell search is slower and gives messier results than the built-in tools.">.
+**Try this:** <one concrete fix, said simply. e.g. "Reach for the built-in search/read first; keep shell `grep` for real pipes.">.
 ```
 
 **Gaps** are in their own list below the numbered recommendations. Each is a one-line bullet (no Evidence/Install/Confidence blocks) ending with a `npx skills init <name>` scaffold command so the gap is actionable, not just named. The `○○○` lives in the section heading, not on each bullet, so the eye scans the list as a clean group. Only append the `npx skills init` command when skills.sh is in `available_catalogs` (i.e. `npx` is present); otherwise leave the bullet as a plain description.
@@ -217,8 +237,9 @@ Build coaching points from these signals (skip any that don't clear the threshol
 
 **Delivery rules:**
 - **Cap at 3 coaching points.** Pick the highest-signal ones. A short, sharp coaching section beats an exhaustive nag.
-- Each point uses the **Evidence → Costs you → Better** shape from the template. Lead with the count.
-- **Frame as a lever, not a scolding.** "A fifth of your shell calls reach past the native tools" — not "you're using grep wrong."
+- Each point uses the **What we saw → Why it matters → Try this** shape from the template. Lead with the count.
+- **Write plainly.** Short sentences, everyday words. Explain any tech term in passing or avoid it. Aim for a smart friend, not a manual: "Shell search is slower and messier" beats "spawns a subprocess returning unstructured stdout."
+- **Frame as a lever, not a scolding.** "Most of your searching already uses the fast tools — here's the last bit" — not "you're using grep wrong."
 - If no signal clears its threshold, **omit the whole section.** Silence is better than manufactured advice.
 
 ### Tone
