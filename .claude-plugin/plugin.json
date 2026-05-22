@@ -1,6 +1,7 @@
 {
   "name": "skills-daimon",
   "skills": [
-    "./skills-daimon"
+    "./skills-daimon",
+    "./prompt-to-command"
   ]
 }

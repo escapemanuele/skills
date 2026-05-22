@@ -46,18 +46,23 @@ Other trigger phrases:
 - "find skills that match my work"
 - "what could I do better with Claude?"
 
-## Repo layout
+## Skills
 
-This repo is the `skills-daimon` Claude Code plugin (`.claude-plugin/plugin.json`). The skill is a folder containing a `SKILL.md`:
+This repo is the `skills-daimon` Claude Code plugin (`.claude-plugin/plugin.json`). Each skill is a folder with a `SKILL.md`:
+
+- **skills-daimon** — the usage report: recap, recommendations, health check, coaching, archetype.
+- **prompt-to-command** — turn a prompt you keep retyping into a saved slash command. Pairs with the report: skills-daimon *finds* the repeated prompt; this one *fixes* it.
 
 ```
 skills/                          # repo (escapemanuele/skills)
 ├── .claude-plugin/plugin.json   # plugin "skills-daimon" + its skill paths
-└── skills-daimon/               # the skill
-    ├── SKILL.md                 # instructions Claude follows
-    └── bin/
-        ├── scan.py              # deterministic session scanner
-        └── render_report.py     # self-contained HTML report renderer
+├── skills-daimon/
+│   ├── SKILL.md                 # instructions Claude follows
+│   └── bin/
+│       ├── scan.py              # deterministic session scanner
+│       └── render_report.py     # self-contained HTML report renderer
+└── prompt-to-command/
+    └── SKILL.md
 ```
 
 ## License
