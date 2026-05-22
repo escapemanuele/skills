@@ -226,6 +226,12 @@ header.hero .sub{opacity:.9;font-size:14px}
 .badges{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
 .badge{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.25);
   padding:3px 10px;border-radius:999px;font-size:12px}
+.archetype{display:flex;align-items:center;gap:18px;margin-top:20px;
+  background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);
+  border-radius:14px;padding:16px 18px}
+.archlabel{font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:.85}
+.archtitle{font-size:22px;font-weight:700;line-height:1.15;margin:2px 0}
+.archtag{font-size:13px;opacity:.9}
 h2.sec{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:%(MUTED)s;
   margin:34px 0 14px;border-bottom:1px solid %(GAP)s;padding-bottom:8px}
 .card{background:#fff;border:1px solid %(GAP)s;border-radius:14px;padding:18px 20px;
@@ -313,10 +319,24 @@ def render(payload: dict) -> str:
     badges = "".join(
         f'<span class="badge">{esc(c)}</span>' for c in m.get("catalogs", [])
     )
+
+    # Archetype: a playful title + tagline (text only).
+    arch = payload.get("archetype") or {}
+    arch_html = ""
+    if arch.get("title"):
+        arch_html = (
+            '<div class="archetype">'
+            f'<div class="archtext"><div class="archlabel">Your archetype</div>'
+            f'<div class="archtitle">{esc(arch.get("title"))}</div>'
+            f'<div class="archtag">{esc(arch.get("tagline", ""))}</div></div>'
+            '</div>'
+        )
+
     hero = (
         '<header class="hero"><h1>Your usage report</h1>'
         f'<div class="sub">Last {esc(m.get("days", 14))} days · '
         f'generated {esc(m.get("date", ""))}</div>'
+        f'{arch_html}'
         '<div class="stats">'
         f'<div class="s"><b>{esc(m.get("sessions", "?"))}</b><span>sessions</span></div>'
         f'<div class="s"><b>{esc(m.get("projects", "?"))}</b><span>projects</span></div>'
