@@ -142,6 +142,8 @@ Use this exact template. Keep it scannable. Be specific. Be honest.
 
 📊 **Visual report:** <file:// URL printed by render_report.py> *(open in a browser)*
 
+🏛 **Your archetype: <title>** — <one-line tagline grounded in the mix>.
+
 Scanned **N sessions** across **M projects**.
 **Skill sources searched** (the marketplaces & registries recommendations can come from): <comma-separated list of `available_catalogs[*].name`, e.g. skills.sh, caveman, claude-plugins-official>.
 
@@ -260,12 +262,38 @@ Build coaching points from these signals (skip any that don't clear the threshol
 - No more than 5 recommended skills total. No more than 3 "worth building yourself" entries. No more than 3 coaching points.
 - **Evidence-bound coaching is in scope** — calling out a habit ("214 raw `grep`/`find`/`cat` calls — the native Grep/Glob/Read tools are faster") is exactly the teacher role, *as long as it cites a count*. What's still out of bounds is **count-free editorializing** ("you should review PRs less often") — opinions with no number behind them.
 
+## Step 5.5 — Award an archetype (a playful title)
+
+Give the user a short, mythic/playful title that captures how they work, from `work_recap.mix` + the tool/MCP signals. This is fun, not science — pick the one archetype that fits best and justify it in one line from the evidence.
+
+Suggested archetypes (extend if a better fit is obvious; keep the tone):
+- **The Data Cartographer** — heavy SQL/Trino/data MCP.
+- **The Refactor Druid** — dev-dominant, lots of Edit + git on code.
+- **The Shell Whisperer** — very high bash/verb volume.
+- **The Scribe** — writing-dominant (prose `.md` edits, long prompts).
+- **The Builder-Scribe** — a real mix of dev + writing (e.g. ~60/35).
+- **The Orchestrator** — heavy subagent/Task or MCP-tool fan-out.
+- **The Pathfinder** — lots of search/explore (Grep/Glob/Read, codebase tours).
+
+Output for the report: a `title` and a one-line `tagline` grounded in the mix (e.g. *"61% dev, 33% writing — you build it and you document it."*).
+
+### Crest image (optional, network + cost)
+
+If `OPENAI_API_KEY` is set, generate a crest for the title:
+
+```bash
+python3 ~/.claude/skills/skills-daimon/bin/generate_crest.py "<archetype title>" --date <YYYY-MM-DD>
+```
+
+(Plugin: prefer `"$CLAUDE_PLUGIN_ROOT/bin/generate_crest.py"`.) It prints `{"path": "...png"}` on success, or `{"skipped": "no OPENAI_API_KEY"}` / `{"error": ...}`. **This is the only part of skills-daimon that uses the network and costs money** (gpt-image-1, low quality ≈ $0.01–0.02/run). The prompt sent contains **only the archetype title** — never session data. No key → skip the image; the title still shows. If a `path` comes back, pass it as `archetype.image_path` so the renderer inlines it.
+
 ## Step 6 — Render the HTML companion
 
 After the markdown report is written, generate a self-contained visual version and link it at the top.
 
 1. **Assemble a payload JSON** from the analysis you just produced plus the deterministic counts from the scan. Schema (see `bin/render_report.py` docstring for the authoritative version):
    - `meta`: `{days, sessions, projects, date, catalogs}` (date = today, ISO).
+   - `archetype`: `{title, tagline, image_path}` from Step 5.5. `image_path` only if the crest was generated (omit otherwise — the title still renders in the hero).
    - `recommendations`: one object per rec — `{rank, confidence: "high"|"med"|"low", type, name, job, evidence, description, install: [cmds], source_url}`.
    - `gaps`: `[{tag, note, init}]` (the "Worth building yourself" list).
    - `coaching`: `[{title, evidence, costs, better}]` (keys unchanged; the renderer labels them What we saw / Why it matters / Try this).
