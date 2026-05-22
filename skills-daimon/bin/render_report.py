@@ -86,34 +86,39 @@ def bar_chart(data: dict, title: str, top: int = 10, color: str = BAR) -> str:
     )
 
 
-def donut(bypass: int, native: int) -> str:
-    """Donut showing bypass vs native tool usage."""
-    total = bypass + native
-    if total <= 0:
-        return ""
-    frac = bypass / total
-    import math
+VERDICT_LABEL = {"good": "✓ good", "warn": "↑ improve", "bad": "↑ change"}
 
-    r, cx, cy, sw = 70, 90, 90, 26
-    circ = 2 * math.pi * r
-    dash = circ * frac
-    pct = round(frac * 100)
-    return (
-        '<div class="chart"><h3>Native tools vs raw shell</h3>'
-        f'<svg viewBox="0 0 180 180" width="200" role="img">'
-        f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{GAP}" '
-        f'stroke-width="{sw}"/>'
-        f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{BAR_WARN}" '
-        f'stroke-width="{sw}" stroke-dasharray="{dash:.1f} {circ:.1f}" '
-        f'stroke-dashoffset="0" transform="rotate(-90 {cx} {cy})" '
-        f'stroke-linecap="round"/>'
-        f'<text x="{cx}" y="{cy - 2}" text-anchor="middle" class="dn">{pct}%</text>'
-        f'<text x="{cx}" y="{cy + 18}" text-anchor="middle" class="dl">raw shell</text>'
-        '</svg>'
-        f'<p class="cap"><b style="color:{BAR_WARN}">{bypass}</b> raw '
-        f'grep/find/cat &nbsp;·&nbsp; <b>{native}</b> native Grep/Glob/Read</p>'
-        '</div>'
-    )
+
+def scorecard_strip(items: list) -> str:
+    """Health-check rows. Each item: {label, value, verdict, note}.
+
+    `verdict` is one of good / warn / bad (Claude applies the judgment; the
+    renderer just colors it). Only signals with a clear better direction belong
+    here — never raw counts that have no good/bad.
+    """
+    if not items:
+        return ""
+    rows = []
+    for it in items:
+        v = it.get("verdict", "warn")
+        vlabel = VERDICT_LABEL.get(v, "")
+        note = esc(it.get("note", ""))
+        explain = esc(it.get("explain", ""))
+        body = note
+        if explain:
+            body += f'<div class="scexplain">{explain}</div>'
+        rows.append(
+            '<details class="scrow">'
+            '<summary>'
+            '<span class="scchev">▸</span>'
+            f'<div class="scmain"><div class="sclabel">{esc(it.get("label", ""))}</div></div>'
+            f'<div class="scval">{esc(it.get("value", ""))}</div>'
+            f'<span class="verdict {esc(v)}">{vlabel}</span>'
+            '</summary>'
+            f'<div class="scbody">{body}</div>'
+            '</details>'
+        )
+    return '<div class="card scorecard">' + "".join(rows) + "</div>"
 
 
 def rec_card(r: dict) -> str:
@@ -158,31 +163,6 @@ def fmt_tokens(n: int) -> str:
     if n >= 1_000:
         return f"{n / 1_000:.1f}K"
     return str(n)
-
-
-def usage_card(u: dict) -> str:
-    """Token totals + approximate cost + per-model bar."""
-    if not u:
-        return ""
-    t = u.get("totals", {})
-    in_tok = (t.get("input", 0) or 0) + (t.get("cache_read", 0) or 0) + (t.get("cache_write", 0) or 0)
-    out_tok = t.get("output", 0) or 0
-    cost = u.get("est_cost_usd_total")
-    by_model = {m: (v.get("est_cost_usd") or 0) for m, v in (u.get("by_model") or {}).items()}
-    bars = bar_chart(by_model, "Est. cost by model ($)", top=6, color="#7c3aed") if any(by_model.values()) else ""
-    cost_str = f"~${cost:,.0f}" if cost else "—"
-    return (
-        '<div class="card usage">'
-        '<div class="bignums">'
-        f'<div class="bn"><b>{esc(fmt_tokens(in_tok))}</b><span>tokens in (incl. cache)</span></div>'
-        f'<div class="bn"><b>{esc(fmt_tokens(out_tok))}</b><span>tokens out</span></div>'
-        f'<div class="bn"><b>{esc(cost_str)}</b><span>est. cost</span></div>'
-        '</div>'
-        f'<p class="cap">Approximate, priced {esc(u.get("pricing_as_of", "?"))}. '
-        'Cache reads are large and cheap — normal.</p>'
-        f'{bars}'
-        '</div>'
-    )
 
 
 KIND_ICON = {"dev": "⚙", "writing": "✍", "data": "▦", "ops": "◷", "other": "•"}
@@ -240,7 +220,10 @@ header.hero .sub{opacity:.9;font-size:14px}
 .stats{display:flex;gap:28px;margin-top:18px;flex-wrap:wrap}
 .stats .s b{font-size:24px;display:block;line-height:1}
 .stats .s span{font-size:12px;opacity:.85;text-transform:uppercase;letter-spacing:.5px}
-.badges{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap}
+.srclabel{margin-top:18px;font-size:12px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.5px;opacity:.95}
+.srclabel span{font-weight:400;text-transform:none;letter-spacing:0;opacity:.8}
+.badges{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
 .badge{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.25);
   padding:3px 10px;border-radius:999px;font-size:12px}
 h2.sec{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:%(MUTED)s;
@@ -273,11 +256,31 @@ ul.gaps code{display:inline-block;margin-top:6px}
 .chart{background:#fff;border:1px solid %(GAP)s;border-radius:14px;padding:16px 18px;flex:1;min-width:280px}
 .chart h3{margin:0 0 12px;font-size:14px}
 .bl{font-size:12px;fill:%(INK)s}.bv{font-size:12px;fill:%(MUTED)s}
-.dn{font-size:30px;font-weight:700;fill:%(INK)s}.dl{font-size:11px;fill:%(MUTED)s}
 .cap{font-size:12px;color:%(MUTED)s;margin:10px 0 0;text-align:center}
-.bignums{display:flex;gap:36px;flex-wrap:wrap}
-.bignums .bn b{font-size:30px;display:block;line-height:1.1;color:%(INK)s}
-.bignums .bn span{font-size:12px;color:%(MUTED)s}
+.scorecard{padding:6px 20px}
+details.scrow{border-bottom:1px solid #f1f2f5}
+details.scrow:last-child{border-bottom:0}
+details.scrow summary{display:flex;align-items:center;gap:12px;padding:14px 0;cursor:pointer;
+  list-style:none;outline:none}
+details.scrow summary::-webkit-details-marker{display:none}
+.scchev{color:%(MUTED)s;font-size:12px;transition:transform .15s;flex-shrink:0}
+details.scrow[open] .scchev{transform:rotate(90deg)}
+.scmain{flex:1;min-width:0}
+.sclabel{font-weight:600;font-size:15px}
+.scval{font-variant-numeric:tabular-nums;font-weight:700;font-size:15px;white-space:nowrap;color:%(MUTED)s}
+.scrow .verdict{margin:0;flex-shrink:0}
+.scbody{padding:0 0 16px 24px;color:#374151;font-size:13.5px;line-height:1.55}
+.scexplain{margin-top:8px;padding:10px 12px;background:#f7f8fb;border-radius:8px;color:%(INK)s}
+.verdict{text-align:center;font-size:12.5px;font-weight:600;margin:12px auto 0;
+  padding:5px 12px;border-radius:999px;display:block;width:fit-content}
+.verdict.good{background:#ecfdf5;color:#059669}
+.verdict.warn{background:#fffbeb;color:#d97706}
+.verdict.bad{background:#fef2f2;color:#dc2626}
+.seclead{color:%(MUTED)s;font-size:14px;margin:-6px 0 12px}
+h2.sec.big{font-size:20px;text-transform:none;letter-spacing:0;color:%(INK)s;border:0;
+  margin:8px 0 16px}
+.coachbreak{height:3px;margin:40px 0 0;border-radius:2px;
+  background:linear-gradient(90deg,%(ACCENT)s,#7c3aed)}
 .recap .mixbar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:%(GAP)s}
 .recap .seg{height:100%%;display:inline-block}
 .recap .seg.k-dev{background:#6366f1}.recap .seg.k-writing{background:#10b981}
@@ -305,14 +308,13 @@ def render(payload: dict) -> str:
     gaps = payload.get("gaps", [])
     coaching = payload.get("coaching", [])
     charts = payload.get("charts", {})
-    usage = payload.get("usage", {})
     work_recap = payload.get("work_recap", {})
 
     badges = "".join(
         f'<span class="badge">{esc(c)}</span>' for c in m.get("catalogs", [])
     )
     hero = (
-        '<header class="hero"><h1>Your skill fit</h1>'
+        '<header class="hero"><h1>Your usage report</h1>'
         f'<div class="sub">Last {esc(m.get("days", 14))} days · '
         f'generated {esc(m.get("date", ""))}</div>'
         '<div class="stats">'
@@ -321,20 +323,29 @@ def render(payload: dict) -> str:
         f'<div class="s"><b>{len(recs)}</b><span>recommendations</span></div>'
         f'<div class="s"><b>{len(coaching)}</b><span>coaching tips</span></div>'
         '</div>'
+        '<div class="srclabel">Skill sources searched <span>— marketplaces &amp; registries recommendations can come from</span></div>'
         f'<div class="badges">{badges}</div></header>'
     )
 
-    # charts row
-    nb = charts.get("native_bypass") or {}
+    # Health-check scorecard (payload-driven; each item carries its own verdict)
+    scorecard = payload.get("scorecard", [])
+    scorecard_html = (
+        '<h2 class="sec">Health check</h2>'
+        '<p class="seclead">How you\'re working, scored where there\'s a clear better way.</p>'
+        + scorecard_strip(scorecard)
+        if scorecard else ""
+    )
+
+    # Activity bars — pure context, no verdict. Moved to the bottom.
     chart_blocks = []
     if charts.get("tool_use_top"):
         chart_blocks.append(bar_chart(charts["tool_use_top"], "Tool use", top=8, color=BAR))
-    if nb.get("bypass_total") is not None and nb.get("native_total") is not None:
-        chart_blocks.append(donut(nb["bypass_total"], nb["native_total"]))
     if charts.get("bash_verbs_top"):
         chart_blocks.append(bar_chart(charts["bash_verbs_top"], "Top bash verbs", top=10, color="#0ea5e9"))
     charts_html = (
-        f'<h2 class="sec">Your activity</h2><div class="charts">{"".join(chart_blocks)}</div>'
+        '<h2 class="sec">Your activity — just for context</h2>'
+        '<p class="seclead">Raw counts, no score. Just what you ran most.</p>'
+        f'<div class="charts">{"".join(chart_blocks)}</div>'
         if chart_blocks else ""
     )
 
@@ -342,22 +353,21 @@ def render(payload: dict) -> str:
         '<h2 class="sec">What you\'ve been working on</h2>' + recap_strip(work_recap)
         if work_recap.get("top_projects") else ""
     )
-    usage_html = (
-        '<h2 class="sec">Usage &amp; cost</h2>' + usage_card(usage)
-        if usage.get("totals") else ""
-    )
 
     recs_html = (
         '<h2 class="sec">Recommendations</h2>' + "".join(rec_card(r) for r in recs)
         if recs else ""
     )
     gaps_html = (
-        '<h2 class="sec">Gaps — worth authoring</h2><ul class="gaps">'
+        '<h2 class="sec">Worth building yourself</h2>'
+        '<p class="seclead">You do these a lot, but no existing skill matches — so you\'d make your own.</p>'
+        '<ul class="gaps">'
         + "".join(gap_item(g) for g in gaps) + "</ul>"
         if gaps else ""
     )
     coach_html = (
-        '<h2 class="sec">Habits &amp; leverage — coaching</h2>'
+        '<div class="coachbreak"></div>'
+        '<h2 class="sec big">⚑ Coaching — small habits worth changing</h2>'
         + "".join(coach_card(c) for c in coaching)
         if coaching else ""
     )
@@ -366,7 +376,8 @@ def render(payload: dict) -> str:
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         "<title>skills-daimon report</title><style>" + CSS + "</style></head><body>"
-        '<div class="wrap">' + hero + recap_html + usage_html + charts_html + recs_html + gaps_html + coach_html
+        '<div class="wrap">' + hero + recap_html + scorecard_html + recs_html
+        + gaps_html + coach_html + charts_html
         + '<footer>Generated by skills-daimon · evidence from your own Claude Code sessions · '
           'no data left this machine</footer>'
         "</div></body></html>"

@@ -451,28 +451,6 @@ DESTRUCTIVE_PATTERNS = [
 
 CURL_HOST_RE = re.compile(r"\b(?:curl|wget)\b[^|&;]*?https?://([^/\s'\"]+)", re.IGNORECASE)
 
-# --- Token pricing (approximate, USD per 1M tokens) -------------------------
-# Hardcoded because session logs carry no dollar field. Prices drift — update
-# PRICING_AS_OF when you revise these. Keyed by model-family prefix.
-PRICING_AS_OF = "2026-05"
-PRICING = {
-    # family prefix : {input, output, cache_write, cache_read}  ($/Mtok)
-    "claude-opus":   {"input": 15.0, "output": 75.0, "cache_write": 18.75, "cache_read": 1.50},
-    "claude-sonnet": {"input": 3.0,  "output": 15.0, "cache_write": 3.75,  "cache_read": 0.30},
-    "claude-haiku":  {"input": 0.80, "output": 4.0,  "cache_write": 1.00,  "cache_read": 0.08},
-}
-
-
-def price_for(model: str) -> dict | None:
-    """Return the pricing row for a model id by family prefix, else None."""
-    if not model:
-        return None
-    for prefix, row in PRICING.items():
-        if model.startswith(prefix):
-            return row
-    return None
-
-
 # --- Work-recap signal buckets (classify what a project/session is about) ---
 # Bash verbs (base token) that signal hands-on software development.
 DEV_VERBS = {
@@ -508,8 +486,7 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
     curl_hosts = collections.Counter()         # host -> count
     project_cwd: dict[str, str] = {}           # project dir name -> real cwd
 
-    # --- usage / cost ---
-    tok_by_model: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    # --- per-project tokens (for the work recap; not cost) ---
     proj_tokens = collections.Counter()        # project -> total tokens (in+out)
     proj_branch: dict[str, str] = {}           # project -> gitBranch
 
@@ -547,19 +524,14 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                             if normalized:
                                 prompt_counter[normalized] += 1
                     elif typ == "assistant":
-                        # Token usage (per assistant message) → by model + per project
+                        # Per-project token volume (input+output) for the work recap.
                         msg = ev.get("message") or {}
                         usage = msg.get("usage") or {}
                         if usage:
-                            model = msg.get("model") or "unknown"
-                            c = tok_by_model[model]
-                            ti = int(usage.get("input_tokens") or 0)
-                            to = int(usage.get("output_tokens") or 0)
-                            c["input"] += ti
-                            c["output"] += to
-                            c["cache_write"] += int(usage.get("cache_creation_input_tokens") or 0)
-                            c["cache_read"] += int(usage.get("cache_read_input_tokens") or 0)
-                            proj_tokens[project] += ti + to
+                            proj_tokens[project] += (
+                                int(usage.get("input_tokens") or 0)
+                                + int(usage.get("output_tokens") or 0)
+                            )
                         for tu in tool_uses_from_assistant(ev):
                             name = tu.get("name", "?")
                             tool_uses[name] += 1
@@ -693,42 +665,6 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
         "hot_repos_without_claudemd": hot_repos_no_claudemd,
     }
 
-    # --- Usage & approximate cost ---
-    totals = collections.Counter()
-    by_model = {}
-    uncosted = []
-    cost_total = 0.0
-    for model, c in tok_by_model.items():
-        if not any(c[k] for k in ("input", "output", "cache_write", "cache_read")):
-            continue  # skip zero-token models (e.g. <synthetic>)
-        for k in ("input", "output", "cache_write", "cache_read"):
-            totals[k] += c[k]
-        row = price_for(model)
-        if row:
-            cost = (
-                c["input"] / 1e6 * row["input"]
-                + c["output"] / 1e6 * row["output"]
-                + c["cache_write"] / 1e6 * row["cache_write"]
-                + c["cache_read"] / 1e6 * row["cache_read"]
-            )
-            cost_total += cost
-        else:
-            cost = None
-            uncosted.append(model)
-        by_model[model] = {
-            "input": c["input"], "output": c["output"],
-            "cache_write": c["cache_write"], "cache_read": c["cache_read"],
-            "est_cost_usd": round(cost, 2) if cost is not None else None,
-        }
-    usage = {
-        "pricing_as_of": PRICING_AS_OF,
-        "days": max_age_days,
-        "totals": dict(totals),
-        "by_model": by_model,
-        "est_cost_usd_total": round(cost_total, 2),
-        "uncosted_models": uncosted,
-    }
-
     # --- Work recap: top projects (kind-tagged) + overall mix ---
     top_projects = []
     for proj, n in project_counts.most_common(6):
@@ -786,7 +722,6 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
         "available_catalogs": catalogs,
         "ignored_names": load_ignored(),
         "coaching_signals": coaching_signals,
-        "usage": usage,
         "work_recap": work_recap,
     }
 
