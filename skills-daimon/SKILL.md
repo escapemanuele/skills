@@ -1,12 +1,12 @@
 ---
-name: skill-fit
-description: Look at the user's recent Claude Code sessions, spot recurring jobs in the actual work, and recommend matching skills/plugins from every reachable catalog (local plugin marketplaces and any CLI-provider catalogs the user has installed). Use when the user asks "what skills should I install?", "what could I be doing better in Claude?", "find skills that match my work", or otherwise wants evidence-based skill recommendations grounded in their own usage.
+name: skills-daimon
+description: Look at the user's recent Claude Code sessions, spot recurring jobs in the actual work, recommend matching skills/plugins from every reachable catalog, AND coach better habits (native tools over raw shell, safer git, CLAUDE.md, saved commands) from the same evidence. Use when the user asks "what skills should I install?", "what could I be doing better in Claude?", "find skills that match my work", "how can I improve my Claude usage?", or otherwise wants evidence-based recommendations and coaching grounded in their own usage.
 allowed-tools: Bash, Read
 ---
 
-# skill-fit — evidence-based skill recommendations
+# skills-daimon — evidence-based skill recommendations and coaching
 
-Looks at the user's recent Claude Code sessions, identifies recurring jobs they keep doing by hand, and recommends skills/plugins from the catalogs the user can reach. Every recommendation must come from a catalog the scanner found — never invent skills.
+Looks at the user's recent Claude Code sessions, identifies recurring jobs they keep doing by hand, recommends skills/plugins from the catalogs the user can reach, and coaches better working habits — all grounded in hard counts from their own sessions. Every recommendation must come from a catalog the scanner found (never invent skills), and every coaching point must cite a real count (never generic advice).
 
 ## When to use
 
@@ -15,7 +15,7 @@ Run this skill when the user asks any of:
 - "Find skills for the things I do."
 - "What could I do better with Claude?"
 - "Analyze my Claude usage and recommend tools."
-- Anything mentioning "skill-fit" by name.
+- Anything mentioning "skills-daimon" by name.
 
 Skip if the user asks for general advice on a specific task — that's not what this skill does. This skill is **about the user's past work, not a current task.**
 
@@ -28,7 +28,7 @@ Skip if the user asks for general advice on a specific task — that's not what 
 Run the bundled scanner. It reads `~/.claude/projects/*/*.jsonl`, filters to the last 14 days by default, and emits a single JSON blob with deterministic counts:
 
 ```bash
-python3 ~/.claude/skills/skill-fit/bin/scan.py --days 14
+python3 ~/.claude/skills/skills-daimon/bin/scan.py --days 14
 ```
 
 (If invoked as a plugin and `$CLAUDE_PLUGIN_ROOT` is set, prefer `"$CLAUDE_PLUGIN_ROOT/bin/scan.py"`.)
@@ -36,8 +36,14 @@ python3 ~/.claude/skills/skill-fit/bin/scan.py --days 14
 The JSON includes:
 - **Evidence fields:** `session_count`, `projects`, `tool_use_top`, `mcp_calls_top`, `bash_verbs_top`, `bash_verb_samples`, `web_fetches`, `recurring_prompts`, `sampled_oneoff_prompts`, `session_index`. Use these as evidence in the report — every claim about how many times the user did X must come from this JSON.
 - **`bash_verb_samples`** maps a verb to up to 5 real command lines the user ran. Use it whenever a top verb is ambiguous (`node`, `curl`, `python3`, `for`, `cd`) — the samples reveal the actual workflow. Quote them in the Evidence line when they sharpen the job tag.
-- **Filter fields:** `installed_skills` (list of skill `name:` values found locally), `installed_plugins` (list of plugin names from `installed_plugins.json`), `ignored_names` (user-dismissed names from `~/.claude/skills/skill-fit/.ignored.json`). Use these to **skip recommending anything already installed or explicitly dismissed**. If a search result's `name` or `slug` matches anything in `installed_skills`, `installed_plugins`, or `ignored_names`, drop it.
+- **Filter fields:** `installed_skills` (list of skill `name:` values found locally), `installed_plugins` (list of plugin names from `installed_plugins.json`), `ignored_names` (user-dismissed names from `~/.claude/skills/skills-daimon/.ignored.json`). Use these to **skip recommending anything already installed or explicitly dismissed**. If a search result's `name` or `slug` matches anything in `installed_skills`, `installed_plugins`, or `ignored_names`, drop it.
 - **Catalog fields:** `available_catalogs` (list of catalog sources reachable in this env). Each entry has `name` and `type` — one of `marketplace`, `cli-provider`, `cli-registry`, or `mcp-server` — plus a type-specific field: `marketplace_json` (local JSON index), `tool` (CLI command like `wp context <provider>` or `npx skills find`), or `probe` (instructions for an `mcp-server`). The `cli-registry` entry (skills.sh) also carries `install_tool` (`npx skills add`) and `init_tool` (`npx skills init`). Query every catalog in the list — never hardcode one. **`mcp-server` entries are catalog *candidates*** the scanner found in config but could not probe (a subprocess can't call MCP) — you must probe them yourself, see Step 3.
+- **Coaching fields:** `coaching_signals` — deterministic habit signals for the teacher section (Step 5). Sub-fields:
+  - `native_tool_bypass` — `{bash_total, bypass_calls, bypass_total, suggested_tool, native_tool_use}`. `bypass_calls` counts shell verbs (`grep`/`find`/`cat`/`head`/`tail`/`sed`/`awk`) that duplicate a native Claude tool; `suggested_tool` maps each to its replacement; `native_tool_use` shows how often Grep/Glob/Read were used instead. Compare the two.
+  - `destructive_cmds` — list of `{label, count, sample}` for risky commands seen (`git push --force`, `git reset --hard`, `git clean -fd`, `--no-verify`, `rm -rf`). The sample is one real command.
+  - `raw_http_hosts` — `{host: count}` for hosts hit by raw `curl`/`wget`. A host with a dedicated CLI/MCP (e.g. `teamcity.a8c.com`) is a coaching opportunity.
+  - `sleep_calls` — count of foreground `sleep` calls (often polling that a proper wait/background job would replace).
+  - `hot_repos_without_claudemd` — `[{path, sessions}]` for git repos with ≥3 sessions and no `CLAUDE.md` (context re-explained each session).
 
 If `session_count` is 0, stop and tell the user there's no recent session data to analyze.
 
@@ -46,7 +52,7 @@ If `session_count` is 0, stop and tell the user there's no recent session data t
 If the user says "I don't want <name> recommended again" (or similar), append the name to the ignored list and confirm:
 
 ```bash
-python3 ~/.claude/skills/skill-fit/bin/scan.py --ignore <name>
+python3 ~/.claude/skills/skills-daimon/bin/scan.py --ignore <name>
 ```
 
 The next scan will skip it automatically. Reverse with `--unignore <name>`. List with `--list-ignored`.
@@ -131,6 +137,8 @@ Use this exact template. Keep it scannable. Be specific. Be honest.
 ```
 # Your skill fit — last 14 days
 
+📊 **Visual report:** <file:// URL printed by render_report.py> *(open in a browser)*
+
 Scanned **N sessions** across **M projects**.
 Catalogs queried: <comma-separated list of `available_catalogs[*].name`>.
 
@@ -159,6 +167,13 @@ Catalogs queried: <comma-separated list of `available_catalogs[*].name`>.
 
 - **<job tag>** — <one-line: evidence + why no catalog match>. Start one: `npx skills init <name>`
 - **<job tag>** — <one-line: evidence + why no catalog match>. Start one: `npx skills init <name>`
+
+## ⚑ Habits & leverage — coaching
+
+### <habit tag>
+**Evidence:** <hard count + one real command/sample from `coaching_signals`, e.g. "ran raw `grep`/`find`/`cat` 214× vs Grep/Glob/Read 864× — a fifth of your shell calls reach past the native tools">.
+**Costs you:** <one line — why the current way is slower / riskier / repetitive>.
+**Better:** <one concrete fix: the tool, command, or pattern to use instead>.
 ```
 
 **Gaps** are in their own list below the numbered recommendations. Each is a one-line bullet (no Evidence/Install/Confidence blocks) ending with a `npx skills init <name>` scaffold command so the gap is actionable, not just named. The `○○○` lives in the section heading, not on each bullet, so the eye scans the list as a clean group. Only append the `npx skills init` command when skills.sh is in `available_catalogs` (i.e. `npx` is present); otherwise leave the bullet as a plain description.
@@ -183,12 +198,54 @@ The dots go between the number and the job tag: `### 1. ●●● <job tag>`. Th
 
 Gap entries use `○○○` in their **section heading** (`## ○○○ Gaps — workflows worth authoring`), not on each bullet. Each gap is a one-line bullet with the job tag bold-leading and evidence inline. No Install block.
 
+## Step 5 — Coaching: teach better habits from the same evidence
+
+skills-daimon is also a **teacher**, not just an installer. After the recommendations and gaps, read `coaching_signals` and surface a few high-signal habits the user could improve. The bar is the same as for recommendations: **every point cites a hard count from the JSON** — no vibes, no generic best-practice lecture.
+
+Build coaching points from these signals (skip any that don't clear the threshold):
+
+**Anti-patterns (doing it the hard way):**
+- **Native-tool bypass** — if `native_tool_bypass.bypass_total` is a meaningful share of `bash_total` (rule of thumb: ≥10% AND ≥30 calls), point it out. Quote the breakdown (`grep ×N`, `find ×N`, `cat ×N`) and the `suggested_tool` mapping (Grep/Glob/Read), and contrast with `native_tool_use`. The fix: prefer the native tools — they're structured, cheaper, and don't spawn a shell.
+- **Raw HTTP to a tool-backed host** — for each entry in `raw_http_hosts`, if the host has a known CLI/MCP (e.g. `teamcity.a8c.com` → `teamcity` CLI; an API you also see in `available_catalogs`), flag it. Don't flag localhost or one-off hosts.
+- **Destructive commands** — if `destructive_cmds` is non-empty, surface the riskiest (`git push --force`, `git reset --hard`, `--no-verify`) with the count and the safer alternative (`--force-with-lease`, `git revert`, fix the hook). Skip `rm -rf` against `/tmp` — that's normal cleanup, not a habit worth flagging.
+- **Sleep-polling** — if `sleep_calls` ≥ 5, suggest a proper wait/background job over fixed `sleep`.
+
+**Missing patterns (leverage not used):**
+- **Recurring prompt with no saved command** — cross-reference `recurring_prompts` (count ≥ 3) against `installed_skills`. A high-count prompt with no matching skill/command means the user retypes the same instruction — recommend turning it into a `/slash-command` or a skill (`npx skills init <name>` if skills.sh is reachable). The clearest single win for most users.
+- **Hot repo without CLAUDE.md** — for each entry in `hot_repos_without_claudemd`, suggest adding a `CLAUDE.md` so per-repo context stops being re-explained every session.
+- **Plan mode / subagents / memory** — only mention these if a signal supports it (e.g. very large multi-file edit sessions → plan mode; many independent parallel tasks → subagents). Don't list them generically.
+
+**Delivery rules:**
+- **Cap at 3 coaching points.** Pick the highest-signal ones. A short, sharp coaching section beats an exhaustive nag.
+- Each point uses the **Evidence → Costs you → Better** shape from the template. Lead with the count.
+- **Frame as a lever, not a scolding.** "A fifth of your shell calls reach past the native tools" — not "you're using grep wrong."
+- If no signal clears its threshold, **omit the whole section.** Silence is better than manufactured advice.
+
 ### Tone
 
-- Lead with evidence. Every recommendation must cite a count.
+- Lead with evidence. Every recommendation AND every coaching point must cite a count.
 - Mark confidence honestly — *"low"* is fine and trustworthy.
-- No more than 5 recommended skills total. No more than 3 gap entries.
-- Don't editorialize the user's workflow ("you should review PRs less often") — just describe and recommend.
+- No more than 5 recommended skills total. No more than 3 gap entries. No more than 3 coaching points.
+- **Evidence-bound coaching is in scope** — calling out a habit ("214 raw `grep`/`find`/`cat` calls — the native Grep/Glob/Read tools are faster") is exactly the teacher role, *as long as it cites a count*. What's still out of bounds is **count-free editorializing** ("you should review PRs less often") — opinions with no number behind them.
+
+## Step 6 — Render the HTML companion
+
+After the markdown report is written, generate a self-contained visual version and link it at the top.
+
+1. **Assemble a payload JSON** from the analysis you just produced plus the deterministic counts from the scan. Schema (see `bin/render_report.py` docstring for the authoritative version):
+   - `meta`: `{days, sessions, projects, date, catalogs}` (date = today, ISO).
+   - `recommendations`: one object per rec — `{rank, confidence: "high"|"med"|"low", type, name, job, evidence, description, install: [cmds], source_url}`.
+   - `gaps`: `[{tag, note, init}]`.
+   - `coaching`: `[{title, evidence, costs, better}]`.
+   - `charts`: lift straight from the scan JSON — `tool_use_top`, `bash_verbs_top`, and `native_bypass: {bypass_total, native_total: <Grep+Glob+Read>, bypass_calls}` from `coaching_signals.native_tool_bypass`.
+2. **Write the payload** to a temp file and run the renderer:
+   ```bash
+   python3 ~/.claude/skills/skills-daimon/bin/render_report.py /tmp/skills-daimon-payload.json
+   ```
+   (If invoked as a plugin, prefer `"$CLAUDE_PLUGIN_ROOT/bin/render_report.py"`.) It writes `~/.claude/skills/skills-daimon/reports/skills-daimon-<date>.html` and prints `{"path","url"}` as JSON.
+3. **Link it at the very top** of the markdown report using the printed `url` (a `file://` URL the user opens in a browser). If rendering fails for any reason, skip the link silently — the markdown report stands on its own.
+
+The HTML is fully self-contained (inline CSS + inline SVG charts, no network) so it opens offline and nothing leaves the machine.
 
 ## Failure modes to watch for
 

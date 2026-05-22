@@ -1,6 +1,6 @@
 {
-  "name": "escapemanuele-skills",
+  "name": "skills-daimon",
   "skills": [
-    "./skill-fit"
+    "./skills-daimon"
   ]
 }

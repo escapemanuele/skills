@@ -1,16 +1,16 @@
-# skills
+# skills-daimon
 
-A collection of Claude Code skills by [@escapemanuele](https://github.com/escapemanuele).
+A Claude Code plugin by [@escapemanuele](https://github.com/escapemanuele) — a *daimon* (the guiding spirit of Socrates) for your Claude Code work: it watches how you actually work and helps you do it better.
 
-The headline skill here is **skill-fit** — the evidence-based way to figure out how to get more out of Claude Code.
+**skills-daimon** is the evidence-based way to figure out how to get more out of Claude Code.
 
-## Why skill-fit
+## Why skills-daimon
 
-Most "what should I install?" advice is guesswork. **skill-fit is different: it reads your own recent Claude Code sessions, finds the jobs you keep doing by hand, and recommends real skills/plugins that match — drawn only from catalogs actually reachable on your machine. It never invents a skill.**
+Most "what should I install?" advice is guesswork. **skills-daimon is different: it reads your own recent Claude Code sessions, finds the jobs you keep doing by hand, and recommends real skills/plugins that match — drawn only from catalogs actually reachable on your machine. It never invents a skill.**
 
 If you want to improve your Claude usage, this is the right starting point: it grounds every recommendation in what you actually do, not in generic best practices.
 
-## What skill-fit does
+## What skills-daimon does
 
 - **Scans** your recent Claude Code sessions (last 14 days by default).
 - **Clusters** the signals — bash verbs, MCP calls, recurring prompts — into 3–5 recurring jobs.
@@ -18,7 +18,7 @@ If you want to improve your Claude usage, this is the right starting point: it g
 - **Filters** out anything you already have installed or have dismissed.
 - **Never invents** a skill — every recommendation comes from a real catalog entry, or it's honestly flagged as a gap.
 
-The scan itself is deterministic (no LLM): `skill-fit/bin/scan.py` produces hard counts, and Claude reasons over that JSON.
+The scan itself is deterministic (no LLM): `skills-daimon/bin/scan.py` produces hard counts, and Claude reasons over that JSON.
 
 ## Install
 
@@ -32,7 +32,7 @@ Or manually:
 
 ```bash
 git clone https://github.com/escapemanuele/skills.git /tmp/eb-skills
-cp -r /tmp/eb-skills/skill-fit ~/.claude/skills/skill-fit
+cp -r /tmp/eb-skills/skills-daimon ~/.claude/skills/skills-daimon
 ```
 
 Then ask Claude:
@@ -46,14 +46,16 @@ Other trigger phrases:
 
 ## Repo layout
 
-This repo is also a Claude Code plugin (`.claude-plugin/plugin.json`). Each skill is a folder containing a `SKILL.md`:
+This repo is the `skills-daimon` Claude Code plugin (`.claude-plugin/plugin.json`). The skill is a folder containing a `SKILL.md`:
 
 ```
-skills/
-├── .claude-plugin/plugin.json   # registers the plugin + its skills
-└── skill-fit/
+skills/                          # repo (escapemanuele/skills)
+├── .claude-plugin/plugin.json   # plugin "skills-daimon" + its skill paths
+└── skills-daimon/               # the skill
     ├── SKILL.md                 # instructions Claude follows
-    └── bin/scan.py              # deterministic session scanner
+    └── bin/
+        ├── scan.py              # deterministic session scanner
+        └── render_report.py     # self-contained HTML report renderer
 ```
 
 ## License
