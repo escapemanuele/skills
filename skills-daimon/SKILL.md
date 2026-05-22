@@ -25,10 +25,10 @@ Skip if the user asks for general advice on a specific task — that's not what 
 
 ## Step 1 — Scan the user's sessions (hard counts, no LLM)
 
-Run the bundled scanner. It reads `~/.claude/projects/*/*.jsonl`, filters to the last 14 days by default, and emits a single JSON blob with deterministic counts:
+Run the bundled scanner. It reads `~/.claude/projects/*/*.jsonl`, filters to the last 4 weeks (28 days) by default, and emits a single JSON blob with deterministic counts:
 
 ```bash
-python3 ~/.claude/skills/skills-daimon/bin/scan.py --days 14
+python3 ~/.claude/skills/skills-daimon/bin/scan.py --days 28
 ```
 
 (If invoked as a plugin and `$CLAUDE_PLUGIN_ROOT` is set, prefer `"$CLAUDE_PLUGIN_ROOT/bin/scan.py"`.)
@@ -44,6 +44,7 @@ The JSON includes:
   - `raw_http_hosts` — `{host: count}` for hosts hit by raw `curl`/`wget`. A host with a dedicated CLI/MCP (e.g. `teamcity.a8c.com`) is a coaching opportunity.
   - `sleep_calls` — count of foreground `sleep` calls (often polling that a proper wait/background job would replace).
   - `hot_repos_without_claudemd` — `[{path, sessions}]` for git repos with ≥3 sessions and no `CLAUDE.md` (context re-explained each session).
+- **Work-recap field:** `work_recap` — `{top_projects:[{path, sessions, tokens, kind, branch}], mix:{dev,writing,data,ops}}`. `kind` is the dominant signal per project (dev / writing / data / ops); `mix` is the rough percentage split across the window. Use this to describe **what** the user works on and to **weight which recommendations surface first** (see Step 2).
 
 If `session_count` is 0, stop and tell the user there's no recent session data to analyze.
 
@@ -69,6 +70,8 @@ Read the JSON. Identify 3–5 distinct "jobs" the user keeps doing. Lean on:
 For each job, write a short tag (e.g. *"PR review by hand"*, *"Linear triage"*, *"Codebase grep tours"*) and **the concrete evidence count** that justifies it.
 
 Aim for high-signal jobs only. If you can't tie a "job" to specific counts from the JSON, drop it.
+
+**Weight jobs by `work_recap`.** The area where the user spends the most time/tokens should bias which jobs (and therefore recommendations) surface first. If `work_recap.mix` is, say, 60% dev / 33% writing, lead with dev jobs but don't ignore the writing third. If the top projects are non-dev (journal, ops, data), the recommendations should serve *that* work — skills-daimon is not a dev-only tool.
 
 ## Step 3 — For each job, query every available catalog
 
@@ -111,7 +114,7 @@ For each job, merge candidates from every catalog:
      - **Official / blessed sources** (`anthropics`, `vercel-labs`, the upstream tool vendor, or the user's own org) outrank unknown personal authors.
   4. If the catalog reports **no** install/star numbers (e.g. local marketplaces, cli-providers), fall back to: blessed source > richer description > newer entry. **Do not penalize an entry for lacking install counts** — only compare numbers between entries that both have them.
 
-If nothing clearly matches a job, it goes to the **gaps section** — don't force a recommendation.
+If nothing clearly matches a job, it goes to the **"Worth building yourself"** list — don't force a recommendation.
 
 **Use the right label.** Each catalog entry has a `type` field — `skill`, `plugin`, `agent`, `command`, etc. The label in the heading must match: write **"Recommended plugin:"** for plugins (which bundle multiple skills), **"Recommended skill:"** for standalone skills, **"Recommended agent:"** for agents, and so on. Never call a plugin a skill — they're different units with different install commands and surface areas.
 
@@ -121,7 +124,7 @@ For each recommendation, fetch its full content so the install command and trigg
 
 - **CLI-provider hit:** `<tool> get slug=<slug> repo_key=<repo_key>` (using the `tool` field from the catalog entry) — returns the full SKILL.md.
 - **skills.sh hit:** the `npx skills find` result already carries name, description, install count, and stars. That's enough to recommend; no extra fetch needed. If you want the full SKILL.md before recommending, the source is `https://www.skills.sh/<owner>/<repo>/<skill>`.
-- **Marketplace hit:** read the entry directly from the `marketplace_json` file (already in memory from Step 3). If the plugin is cached locally at `~/.claude/plugins/marketplaces/<mp>/<plugin>/`, also read its `README.md` or the bundled `SKILL.md` for richer detail.
+- **Marketplace hit:** read the entry directly from the `marketplace_json` file (already in memory from Step 3). **Capture its `homepage` as the `source_url`** (marketplace entries carry `homepage`, e.g. `github.com/anthropics/claude-plugins-public/.../pr-review-toolkit`; if absent, fall back to the entry's `source.url`). This is what makes the plugin's name a link in the table. If the plugin is cached locally at `~/.claude/plugins/marketplaces/<mp>/<plugin>/`, also read its `README.md` or the bundled `SKILL.md` for richer detail.
 
 The install command rules:
 - **skills.sh registry hit** (came from `npx skills find`): `npx skills add <owner/repo>@<skill> -g -y`. `-g` installs at user level, `-y` skips the confirm prompt. This is the preferred recipe for any skills.sh result — don't fall back to manual clone for these.
@@ -135,12 +138,33 @@ If `get` fails for a CLI-provider pick, fall back to the search description and 
 Use this exact template. Keep it scannable. Be specific. Be honest.
 
 ```
-# Your skill fit — last 14 days
+# Your usage report — last 4 weeks
 
 📊 **Visual report:** <file:// URL printed by render_report.py> *(open in a browser)*
 
 Scanned **N sessions** across **M projects**.
-Catalogs queried: <comma-separated list of `available_catalogs[*].name`>.
+**Skill sources searched** (the marketplaces & registries recommendations can come from): <comma-separated list of `available_catalogs[*].name`, e.g. skills.sh, caveman, claude-plugins-official>.
+
+## What you've been working on
+
+<One-line read of `work_recap.mix`, e.g. "Mostly dev (61%) with a big writing streak (33%) — some data and ops.">
+
+| Project | Sessions | Focus |
+|---|---|---|
+| <basename of path> | <sessions> | <kind> |
+
+(Top 3–5 from `work_recap.top_projects`. Use the path basename, not the full path. This frames the rest of the report — the recommendations below serve this work.)
+
+## Health check
+
+How you're working, scored only where there's a clear better way. Each row = 🟢 good / 🟡 improve / 🔴 change.
+
+| | What we looked at | Now | Verdict |
+|---|---|---|---|
+| 🟡 | File search: shell vs built-in tools | 18% via shell | improve |
+| 🔴 | Risky git commands | 4 in 4 weeks | change |
+
+(One row per `scorecard` item. Same items + thresholds as Step 6. Skip the section if no signal has a quality axis worth scoring.)
 
 ## TL;DR — recommendations
 
@@ -163,27 +187,34 @@ Catalogs queried: <comma-separated list of `available_catalogs[*].name`>.
 ### 2. ●●○ <job tag>
 ... same shape ...
 
-## ○○○ Gaps — workflows worth authoring
+## Worth building yourself
 
-- **<job tag>** — <one-line: evidence + why no catalog match>. Start one: `npx skills init <name>`
-- **<job tag>** — <one-line: evidence + why no catalog match>. Start one: `npx skills init <name>`
+These are things you do a lot, but no existing skill matches — so you'd make your own.
 
-## ⚑ Habits & leverage — coaching
+- **<job tag>** — <one-line: evidence + why no skill matches>. Start one: `npx skills init <name>`
+- **<job tag>** — <one-line: evidence + why no skill matches>. Start one: `npx skills init <name>`
+
+═══════════════════════════════════════
+
+# ⚑ Coaching — small habits worth changing
 
 ### <habit tag>
-**Evidence:** <hard count + one real command/sample from `coaching_signals`, e.g. "ran raw `grep`/`find`/`cat` 214× vs Grep/Glob/Read 864× — a fifth of your shell calls reach past the native tools">.
-**Costs you:** <one line — why the current way is slower / riskier / repetitive>.
-**Better:** <one concrete fix: the tool, command, or pattern to use instead>.
+**What we saw:** <hard count, plainly, e.g. "You ran `grep`/`find`/`cat` in the shell 214 times. The built-in search tools did the same job 864 times.">.
+**Why it matters:** <one short, plain sentence — no jargon. e.g. "Shell search is slower and gives messier results than the built-in tools.">.
+**Try this:** <one concrete fix, said simply. e.g. "Reach for the built-in search/read first; keep shell `grep` for real pipes.">.
 ```
 
-**Gaps** are in their own list below the numbered recommendations. Each is a one-line bullet (no Evidence/Install/Confidence blocks) ending with a `npx skills init <name>` scaffold command so the gap is actionable, not just named. The `○○○` lives in the section heading, not on each bullet, so the eye scans the list as a clean group. Only append the `npx skills init` command when skills.sh is in `available_catalogs` (i.e. `npx` is present); otherwise leave the bullet as a plain description.
+**"Worth building yourself"** is the list below the numbered recommendations: things the user does often where no existing skill fits, so the move is to author one. Each is a one-line bullet (no Evidence/Install/Confidence blocks) ending with a `npx skills init <name>` scaffold command so it's actionable, not just named. Keep the heading plain — no confidence dots. Only append the `npx skills init` command when skills.sh is in `available_catalogs` (i.e. `npx` is present); otherwise leave the bullet as a plain description.
+
+**The coaching section gets a hard visual break** — a full-width separator line and a top-level `#` heading — so it reads as a distinct "now let's talk habits" part, not another list of skills.
 
 ### Links: table only
 
 The user's terminal renders inline markdown links as `name (url)` — the URL is appended visibly. That's an unavoidable CLI-renderer behavior, so:
 
 - **Only the TL;DR table uses `[name](url)` markdown links.** The link is still clickable; the visible URL alongside is the cost.
-- **Body prose uses bold names only** — `**<name>**`, not `[<name>](url)`. Never put a URL in the detailed sections, the gaps section, or the install line.
+- **Every row links — no lopsided tables.** Each recommendation must carry a real `source_url`: skills.sh/ai-skills hits already have one; marketplace plugins use their `homepage` (Step 3.5). If a single rec genuinely has no verifiable URL, drop the link from **every** row that table so they look uniform — never link some rows and not others. Never invent a URL.
+- **Body prose uses bold names only** — `**<name>**`, not `[<name>](url)`. Never put a URL in the detailed sections, the "Worth building yourself" list, or the install line.
 - **No links/references section at the end.** The user already has the URLs in the table.
 
 ### Confidence indicator in section headers
@@ -196,7 +227,7 @@ Numbered recommendations carry a filled-dot signal in the heading:
 
 The dots go between the number and the job tag: `### 1. ●●● <job tag>`. There is **no separate "Confidence:" line** — the dots are the confidence level, and the reasoning behind that level should be the **opening sentence of the Evidence line** (e.g. *"Evidence: You literally tried to install it last week — gh pr ×30, ..."*). This keeps a single source of truth for confidence.
 
-Gap entries use `○○○` in their **section heading** (`## ○○○ Gaps — workflows worth authoring`), not on each bullet. Each gap is a one-line bullet with the job tag bold-leading and evidence inline. No Install block.
+"Worth building yourself" uses a **plain heading** (no confidence dots). Each entry is a one-line bullet with the job tag bold-leading and evidence inline, ending in the `npx skills init` command. No Install block.
 
 ## Step 5 — Coaching: teach better habits from the same evidence
 
@@ -217,15 +248,16 @@ Build coaching points from these signals (skip any that don't clear the threshol
 
 **Delivery rules:**
 - **Cap at 3 coaching points.** Pick the highest-signal ones. A short, sharp coaching section beats an exhaustive nag.
-- Each point uses the **Evidence → Costs you → Better** shape from the template. Lead with the count.
-- **Frame as a lever, not a scolding.** "A fifth of your shell calls reach past the native tools" — not "you're using grep wrong."
+- Each point uses the **What we saw → Why it matters → Try this** shape from the template. Lead with the count.
+- **Write plainly.** Short sentences, everyday words. Explain any tech term in passing or avoid it. Aim for a smart friend, not a manual: "Shell search is slower and messier" beats "spawns a subprocess returning unstructured stdout."
+- **Frame as a lever, not a scolding.** "Most of your searching already uses the fast tools — here's the last bit" — not "you're using grep wrong."
 - If no signal clears its threshold, **omit the whole section.** Silence is better than manufactured advice.
 
 ### Tone
 
 - Lead with evidence. Every recommendation AND every coaching point must cite a count.
 - Mark confidence honestly — *"low"* is fine and trustworthy.
-- No more than 5 recommended skills total. No more than 3 gap entries. No more than 3 coaching points.
+- No more than 5 recommended skills total. No more than 3 "worth building yourself" entries. No more than 3 coaching points.
 - **Evidence-bound coaching is in scope** — calling out a habit ("214 raw `grep`/`find`/`cat` calls — the native Grep/Glob/Read tools are faster") is exactly the teacher role, *as long as it cites a count*. What's still out of bounds is **count-free editorializing** ("you should review PRs less often") — opinions with no number behind them.
 
 ## Step 6 — Render the HTML companion
@@ -235,9 +267,18 @@ After the markdown report is written, generate a self-contained visual version a
 1. **Assemble a payload JSON** from the analysis you just produced plus the deterministic counts from the scan. Schema (see `bin/render_report.py` docstring for the authoritative version):
    - `meta`: `{days, sessions, projects, date, catalogs}` (date = today, ISO).
    - `recommendations`: one object per rec — `{rank, confidence: "high"|"med"|"low", type, name, job, evidence, description, install: [cmds], source_url}`.
-   - `gaps`: `[{tag, note, init}]`.
-   - `coaching`: `[{title, evidence, costs, better}]`.
-   - `charts`: lift straight from the scan JSON — `tool_use_top`, `bash_verbs_top`, and `native_bypass: {bypass_total, native_total: <Grep+Glob+Read>, bypass_calls}` from `coaching_signals.native_tool_bypass`.
+   - `gaps`: `[{tag, note, init}]` (the "Worth building yourself" list).
+   - `coaching`: `[{title, evidence, costs, better}]` (keys unchanged; the renderer labels them What we saw / Why it matters / Try this).
+   - `work_recap`: pass `work_recap` straight from the scan JSON (drives the "What you've been working on" strip).
+   - `scorecard`: `[{label, value, verdict, note, explain}]` — the **Health check** (see below). `verdict` is one of `good` / `warn` / `bad`; the renderer colors it (green / amber / red). Each row is **expandable** (`<details>`): the collapsed summary shows `label` + `value` + verdict; expanding reveals `note` then `explain`. `explain` = 1–2 plain sentences a non-expert understands ("Searching with shell commands like `grep` is slower and gives messier results than Claude's built-in search. Using the built-in tools is faster and cleaner."). **Only include signals that have a clear better direction** — never raw counts.
+   - `charts`: context-only bars — `{tool_use_top, bash_verbs_top}` straight from the scan JSON. These render at the bottom under "just for context" with no verdict (raw counts have no good/bad).
+
+   **Building the scorecard.** Score each signal that has a quality axis; skip any with no data. Use these thresholds:
+   - **File search (shell vs built-in)** — from `coaching_signals.native_tool_bypass`. `value` = "<pct>% via shell", `note` = "<bypass_total> shell vs <Grep+Glob+Read> built-in". Verdict: `<10%` → good, `10–25%` → warn, `>25%` → bad.
+   - **Risky git** — count `git push --force` / `git reset --hard` / `--no-verify` from `destructive_cmds` (ignore `rm -rf`). `0` → good (omit or show good), `1–3` → warn, `4+` → bad.
+   - **Raw HTTP to a tool-backed host** — only for hosts in `raw_http_hosts` that actually have a CLI/MCP (you judge this, e.g. `teamcity.a8c.com`). Any such host → warn. `value` = "<host> ×N".
+   - **Recurring prompt not saved** — recurring prompts (count ≥ 3) with no matching `installed_skills`. Any → warn. `value` = "N prompts".
+   Cap the scorecard at ~4 rows. If a signal is clean, you may show it as a `good` row (reassuring) or omit it — prefer showing at least one `good` row when something genuinely is fine.
 2. **Write the payload** to a temp file and run the renderer:
    ```bash
    python3 ~/.claude/skills/skills-daimon/bin/render_report.py /tmp/skills-daimon-payload.json

@@ -451,6 +451,19 @@ DESTRUCTIVE_PATTERNS = [
 
 CURL_HOST_RE = re.compile(r"\b(?:curl|wget)\b[^|&;]*?https?://([^/\s'\"]+)", re.IGNORECASE)
 
+# --- Work-recap signal buckets (classify what a project/session is about) ---
+# Bash verbs (base token) that signal hands-on software development.
+DEV_VERBS = {
+    "git", "gh", "npm", "yarn", "pnpm", "composer", "php", "node", "npx",
+    "make", "docker", "kubectl", "cargo", "go", "tsc", "eslint", "jest",
+    "vitest", "pytest", "ruby", "rails", "bundle",
+}
+# MCP-name substrings that signal data work vs ops/personal work.
+DATA_MCP_HINTS = ("trino", "sql", "bigquery", "snowflake", "duckdb")
+OPS_MCP_HINTS = ("gmail", "calendar", "slack", "telegram", "discord", "notion")
+# File extensions that mean prose/docs (Write/Edit on these = writing, not dev).
+PROSE_EXT = {"md", "markdown", "mdx", "txt", "rst", "org", "tex", "adoc"}
+
 
 def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
     sessions = []
@@ -473,6 +486,14 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
     curl_hosts = collections.Counter()         # host -> count
     project_cwd: dict[str, str] = {}           # project dir name -> real cwd
 
+    # --- per-project tokens (for the work recap; not cost) ---
+    proj_tokens = collections.Counter()        # project -> total tokens (in+out)
+    proj_branch: dict[str, str] = {}           # project -> gitBranch
+
+    # --- work-recap signals ---
+    work_mix = collections.Counter()           # global: dev/data/writing/ops
+    proj_signal: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+
     for project, path, mtime in iter_session_files(root, max_age_days):
         session_user_msgs = 0
         session_bash = 0
@@ -489,6 +510,10 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                         cwd_val = ev.get("cwd")
                         if isinstance(cwd_val, str) and cwd_val:
                             project_cwd[project] = cwd_val
+                    if project not in proj_branch:
+                        br = ev.get("gitBranch")
+                        if isinstance(br, str) and br and br != "HEAD":
+                            proj_branch[project] = br
                     typ = ev.get("type")
                     if typ == "user":
                         msg = ev.get("message") or {}
@@ -499,9 +524,34 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                             if normalized:
                                 prompt_counter[normalized] += 1
                     elif typ == "assistant":
+                        # Per-project token volume (input+output) for the work recap.
+                        msg = ev.get("message") or {}
+                        usage = msg.get("usage") or {}
+                        if usage:
+                            proj_tokens[project] += (
+                                int(usage.get("input_tokens") or 0)
+                                + int(usage.get("output_tokens") or 0)
+                            )
                         for tu in tool_uses_from_assistant(ev):
                             name = tu.get("name", "?")
                             tool_uses[name] += 1
+                            # Work-recap classification (one bucket per tool use).
+                            # Write/Edit count as dev unless the file is prose/docs.
+                            if name in ("Write", "Edit", "NotebookEdit"):
+                                inp = tu.get("input") or {}
+                                fp = inp.get("file_path") or inp.get("notebook_path") or ""
+                                ext = fp.rsplit(".", 1)[-1].lower() if "." in fp else ""
+                                bucket = "writing" if ext in PROSE_EXT else "dev"
+                                work_mix[bucket] += 1
+                                proj_signal[project][bucket] += 1
+                            elif name.startswith("mcp__"):
+                                low = name.lower()
+                                if any(h in low for h in DATA_MCP_HINTS):
+                                    work_mix["data"] += 1
+                                    proj_signal[project]["data"] += 1
+                                elif any(h in low for h in OPS_MCP_HINTS):
+                                    work_mix["ops"] += 1
+                                    proj_signal[project]["ops"] += 1
                             if name == "Bash":
                                 session_bash += 1
                                 total_bash += 1
@@ -519,6 +569,10 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                                     base = verb.split()[0]
                                     if base in SEARCH_READ_BYPASS:
                                         bypass_calls[base] += 1
+                                    # Work-recap: dev signal from build/VCS verbs
+                                    if base in DEV_VERBS:
+                                        work_mix["dev"] += 1
+                                        proj_signal[project]["dev"] += 1
                                 # Destructive command patterns (match full cmd)
                                 for pat, label in DESTRUCTIVE_PATTERNS:
                                     if pat.search(cmd):
@@ -611,6 +665,27 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
         "hot_repos_without_claudemd": hot_repos_no_claudemd,
     }
 
+    # --- Work recap: top projects (kind-tagged) + overall mix ---
+    top_projects = []
+    for proj, n in project_counts.most_common(6):
+        sig = proj_signal.get(proj)
+        kind = sig.most_common(1)[0][0] if sig else "other"
+        top_projects.append({
+            "path": project_cwd.get(proj, proj),
+            "sessions": n,
+            "tokens": proj_tokens.get(proj, 0),
+            "kind": kind,
+            "branch": proj_branch.get(proj),
+        })
+    mix_total = sum(work_mix.values())
+    work_recap = {
+        "top_projects": top_projects,
+        "mix": {
+            k: round(100 * v / mix_total)
+            for k, v in work_mix.most_common()
+        } if mix_total else {},
+    }
+
     # Catalog probing is expensive (cold path can run ~1 min on machines with
     # many CLI providers). Cache to ~/.claude/skills/skills-daimon/.catalogs-cache.json
     # with a 24h TTL.
@@ -647,6 +722,7 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
         "available_catalogs": catalogs,
         "ignored_names": load_ignored(),
         "coaching_signals": coaching_signals,
+        "work_recap": work_recap,
     }
 
     serialized = json.dumps(summary)
@@ -665,7 +741,7 @@ def main() -> int:
         default=str(Path.home() / ".claude" / "projects"),
         help="Path to ~/.claude/projects (default).",
     )
-    parser.add_argument("--days", type=int, default=14, help="Days to look back (default 14).")
+    parser.add_argument("--days", type=int, default=28, help="Days to look back (default 28).")
     parser.add_argument(
         "--cwd",
         default=None,

@@ -12,10 +12,11 @@ If you want to improve your Claude usage, this is the right starting point: it g
 
 ## What skills-daimon does
 
-- **Scans** your recent Claude Code sessions (last 14 days by default).
-- **Clusters** the signals — bash verbs, MCP calls, recurring prompts — into 3–5 recurring jobs.
-- **Recommends** matching skills/plugins from every catalog it can reach (local plugin marketplaces and CLI-provider catalogs).
-- **Filters** out anything you already have installed or have dismissed.
+- **Scans** your recent Claude Code sessions (last 4 weeks by default).
+- **Recaps** what you've been working on (top projects + a dev/writing/data/ops mix) and your token usage + approximate cost.
+- **Clusters** the signals — bash verbs, MCP calls, recurring prompts — into 3–5 recurring jobs, weighted by what you actually work on.
+- **Recommends** matching skills/plugins from every catalog it can reach (local plugin marketplaces, skills.sh, and org/MCP catalogs).
+- **Coaches** better habits from the same evidence (native tools over raw shell, safer git, CLAUDE.md, saved commands).
 - **Never invents** a skill — every recommendation comes from a real catalog entry, or it's honestly flagged as a gap.
 
 The scan itself is deterministic (no LLM): `skills-daimon/bin/scan.py` produces hard counts, and Claude reasons over that JSON.
