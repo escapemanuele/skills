@@ -1,10 +1,10 @@
 ---
-name: skill-fit
+name: skills-daimon
 description: Look at the user's recent Claude Code sessions, spot recurring jobs in the actual work, recommend matching skills/plugins from every reachable catalog, AND coach better habits (native tools over raw shell, safer git, CLAUDE.md, saved commands) from the same evidence. Use when the user asks "what skills should I install?", "what could I be doing better in Claude?", "find skills that match my work", "how can I improve my Claude usage?", or otherwise wants evidence-based recommendations and coaching grounded in their own usage.
 allowed-tools: Bash, Read
 ---
 
-# skill-fit — evidence-based skill recommendations and coaching
+# skills-daimon — evidence-based skill recommendations and coaching
 
 Looks at the user's recent Claude Code sessions, identifies recurring jobs they keep doing by hand, recommends skills/plugins from the catalogs the user can reach, and coaches better working habits — all grounded in hard counts from their own sessions. Every recommendation must come from a catalog the scanner found (never invent skills), and every coaching point must cite a real count (never generic advice).
 
@@ -15,7 +15,7 @@ Run this skill when the user asks any of:
 - "Find skills for the things I do."
 - "What could I do better with Claude?"
 - "Analyze my Claude usage and recommend tools."
-- Anything mentioning "skill-fit" by name.
+- Anything mentioning "skills-daimon" by name.
 
 Skip if the user asks for general advice on a specific task — that's not what this skill does. This skill is **about the user's past work, not a current task.**
 
@@ -28,7 +28,7 @@ Skip if the user asks for general advice on a specific task — that's not what 
 Run the bundled scanner. It reads `~/.claude/projects/*/*.jsonl`, filters to the last 14 days by default, and emits a single JSON blob with deterministic counts:
 
 ```bash
-python3 ~/.claude/skills/skill-fit/bin/scan.py --days 14
+python3 ~/.claude/skills/skills-daimon/bin/scan.py --days 14
 ```
 
 (If invoked as a plugin and `$CLAUDE_PLUGIN_ROOT` is set, prefer `"$CLAUDE_PLUGIN_ROOT/bin/scan.py"`.)
@@ -36,7 +36,7 @@ python3 ~/.claude/skills/skill-fit/bin/scan.py --days 14
 The JSON includes:
 - **Evidence fields:** `session_count`, `projects`, `tool_use_top`, `mcp_calls_top`, `bash_verbs_top`, `bash_verb_samples`, `web_fetches`, `recurring_prompts`, `sampled_oneoff_prompts`, `session_index`. Use these as evidence in the report — every claim about how many times the user did X must come from this JSON.
 - **`bash_verb_samples`** maps a verb to up to 5 real command lines the user ran. Use it whenever a top verb is ambiguous (`node`, `curl`, `python3`, `for`, `cd`) — the samples reveal the actual workflow. Quote them in the Evidence line when they sharpen the job tag.
-- **Filter fields:** `installed_skills` (list of skill `name:` values found locally), `installed_plugins` (list of plugin names from `installed_plugins.json`), `ignored_names` (user-dismissed names from `~/.claude/skills/skill-fit/.ignored.json`). Use these to **skip recommending anything already installed or explicitly dismissed**. If a search result's `name` or `slug` matches anything in `installed_skills`, `installed_plugins`, or `ignored_names`, drop it.
+- **Filter fields:** `installed_skills` (list of skill `name:` values found locally), `installed_plugins` (list of plugin names from `installed_plugins.json`), `ignored_names` (user-dismissed names from `~/.claude/skills/skills-daimon/.ignored.json`). Use these to **skip recommending anything already installed or explicitly dismissed**. If a search result's `name` or `slug` matches anything in `installed_skills`, `installed_plugins`, or `ignored_names`, drop it.
 - **Catalog fields:** `available_catalogs` (list of catalog sources reachable in this env). Each entry has `name` and `type` — one of `marketplace`, `cli-provider`, `cli-registry`, or `mcp-server` — plus a type-specific field: `marketplace_json` (local JSON index), `tool` (CLI command like `wp context <provider>` or `npx skills find`), or `probe` (instructions for an `mcp-server`). The `cli-registry` entry (skills.sh) also carries `install_tool` (`npx skills add`) and `init_tool` (`npx skills init`). Query every catalog in the list — never hardcode one. **`mcp-server` entries are catalog *candidates*** the scanner found in config but could not probe (a subprocess can't call MCP) — you must probe them yourself, see Step 3.
 - **Coaching fields:** `coaching_signals` — deterministic habit signals for the teacher section (Step 5). Sub-fields:
   - `native_tool_bypass` — `{bash_total, bypass_calls, bypass_total, suggested_tool, native_tool_use}`. `bypass_calls` counts shell verbs (`grep`/`find`/`cat`/`head`/`tail`/`sed`/`awk`) that duplicate a native Claude tool; `suggested_tool` maps each to its replacement; `native_tool_use` shows how often Grep/Glob/Read were used instead. Compare the two.
@@ -52,7 +52,7 @@ If `session_count` is 0, stop and tell the user there's no recent session data t
 If the user says "I don't want <name> recommended again" (or similar), append the name to the ignored list and confirm:
 
 ```bash
-python3 ~/.claude/skills/skill-fit/bin/scan.py --ignore <name>
+python3 ~/.claude/skills/skills-daimon/bin/scan.py --ignore <name>
 ```
 
 The next scan will skip it automatically. Reverse with `--unignore <name>`. List with `--list-ignored`.
@@ -200,7 +200,7 @@ Gap entries use `○○○` in their **section heading** (`## ○○○ Gaps —
 
 ## Step 5 — Coaching: teach better habits from the same evidence
 
-skill-fit is also a **teacher**, not just an installer. After the recommendations and gaps, read `coaching_signals` and surface a few high-signal habits the user could improve. The bar is the same as for recommendations: **every point cites a hard count from the JSON** — no vibes, no generic best-practice lecture.
+skills-daimon is also a **teacher**, not just an installer. After the recommendations and gaps, read `coaching_signals` and surface a few high-signal habits the user could improve. The bar is the same as for recommendations: **every point cites a hard count from the JSON** — no vibes, no generic best-practice lecture.
 
 Build coaching points from these signals (skip any that don't clear the threshold):
 
@@ -240,9 +240,9 @@ After the markdown report is written, generate a self-contained visual version a
    - `charts`: lift straight from the scan JSON — `tool_use_top`, `bash_verbs_top`, and `native_bypass: {bypass_total, native_total: <Grep+Glob+Read>, bypass_calls}` from `coaching_signals.native_tool_bypass`.
 2. **Write the payload** to a temp file and run the renderer:
    ```bash
-   python3 ~/.claude/skills/skill-fit/bin/render_report.py /tmp/skill-fit-payload.json
+   python3 ~/.claude/skills/skills-daimon/bin/render_report.py /tmp/skills-daimon-payload.json
    ```
-   (If invoked as a plugin, prefer `"$CLAUDE_PLUGIN_ROOT/bin/render_report.py"`.) It writes `~/.claude/skills/skill-fit/reports/skill-fit-<date>.html` and prints `{"path","url"}` as JSON.
+   (If invoked as a plugin, prefer `"$CLAUDE_PLUGIN_ROOT/bin/render_report.py"`.) It writes `~/.claude/skills/skills-daimon/reports/skills-daimon-<date>.html` and prints `{"path","url"}` as JSON.
 3. **Link it at the very top** of the markdown report using the printed `url` (a `file://` URL the user opens in a browser). If rendering fails for any reason, skip the link silently — the markdown report stands on its own.
 
 The HTML is fully self-contained (inline CSS + inline SVG charts, no network) so it opens offline and nothing leaves the machine.

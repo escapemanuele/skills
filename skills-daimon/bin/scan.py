@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-skill-fit session scanner.
+skills-daimon session scanner.
 
 Reads ~/.claude/projects/*/*.jsonl session files, extracts deterministic
 signals (no LLM), and emits a compact JSON summary suitable for Claude to
@@ -28,7 +28,7 @@ PROMPT_MAX = 160
 TOP_N = 25
 SUMMARY_CAP_BYTES = 60_000
 
-IGNORED_FILE = Path.home() / ".claude" / "skills" / "skill-fit" / ".ignored.json"
+IGNORED_FILE = Path.home() / ".claude" / "skills" / "skills-daimon" / ".ignored.json"
 
 
 def load_ignored() -> list[str]:
@@ -612,9 +612,9 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
     }
 
     # Catalog probing is expensive (cold path can run ~1 min on machines with
-    # many CLI providers). Cache to ~/.claude/skills/skill-fit/.catalogs-cache.json
+    # many CLI providers). Cache to ~/.claude/skills/skills-daimon/.catalogs-cache.json
     # with a 24h TTL.
-    cache = Path.home() / ".claude" / "skills" / "skill-fit" / ".catalogs-cache.json"
+    cache = Path.home() / ".claude" / "skills" / "skills-daimon" / ".catalogs-cache.json"
     catalogs = load_cached_catalogs(cache, 86400)
     if catalogs is None:
         catalogs = discover_catalogs()

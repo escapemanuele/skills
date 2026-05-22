@@ -1,6 +1,6 @@
 {
   "name": "skills-daimon",
   "skills": [
-    "./skills-daimon/skill-fit"
+    "./skills-daimon"
   ]
 }
