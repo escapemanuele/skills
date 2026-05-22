@@ -1,8 +1,8 @@
-# skills
+# skills-daimon
 
-A collection of Claude Code skills by [@escapemanuele](https://github.com/escapemanuele).
+A Claude Code plugin by [@escapemanuele](https://github.com/escapemanuele) — a *daimon* (the guiding spirit of Socrates) for your Claude Code work: skills that watch how you actually work and help you do it better.
 
-The headline skill here is **skill-fit** — the evidence-based way to figure out how to get more out of Claude Code.
+The first skill is **skill-fit** — the evidence-based way to figure out how to get more out of Claude Code.
 
 ## Why skill-fit
 
@@ -18,7 +18,7 @@ If you want to improve your Claude usage, this is the right starting point: it g
 - **Filters** out anything you already have installed or have dismissed.
 - **Never invents** a skill — every recommendation comes from a real catalog entry, or it's honestly flagged as a gap.
 
-The scan itself is deterministic (no LLM): `skill-fit/bin/scan.py` produces hard counts, and Claude reasons over that JSON.
+The scan itself is deterministic (no LLM): `skills-daimon/skill-fit/bin/scan.py` produces hard counts, and Claude reasons over that JSON.
 
 ## Install
 
@@ -32,7 +32,7 @@ Or manually:
 
 ```bash
 git clone https://github.com/escapemanuele/skills.git /tmp/eb-skills
-cp -r /tmp/eb-skills/skill-fit ~/.claude/skills/skill-fit
+cp -r /tmp/eb-skills/skills-daimon/skill-fit ~/.claude/skills/skill-fit
 ```
 
 Then ask Claude:
@@ -46,14 +46,17 @@ Other trigger phrases:
 
 ## Repo layout
 
-This repo is also a Claude Code plugin (`.claude-plugin/plugin.json`). Each skill is a folder containing a `SKILL.md`:
+This repo is the `skills-daimon` Claude Code plugin (`.claude-plugin/plugin.json`). Skills live as folders under `skills-daimon/`, each containing a `SKILL.md`:
 
 ```
-skills/
-├── .claude-plugin/plugin.json   # registers the plugin + its skills
-└── skill-fit/
-    ├── SKILL.md                 # instructions Claude follows
-    └── bin/scan.py              # deterministic session scanner
+skills/                          # repo (escapemanuele/skills)
+├── .claude-plugin/plugin.json   # plugin "skills-daimon" + its skill paths
+└── skills-daimon/
+    └── skill-fit/
+        ├── SKILL.md             # instructions Claude follows
+        └── bin/
+            ├── scan.py          # deterministic session scanner
+            └── render_report.py # self-contained HTML report renderer
 ```
 
 ## License
