@@ -229,8 +229,6 @@ header.hero .sub{opacity:.9;font-size:14px}
 .archetype{display:flex;align-items:center;gap:18px;margin-top:20px;
   background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);
   border-radius:14px;padding:16px 18px}
-.archetype .crest{width:84px;height:84px;border-radius:12px;flex-shrink:0;
-  background:#fff;object-fit:cover}
 .archlabel{font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:.85}
 .archtitle{font-size:22px;font-weight:700;line-height:1.15;margin:2px 0}
 .archtag{font-size:13px;opacity:.9}
@@ -322,26 +320,12 @@ def render(payload: dict) -> str:
         f'<span class="badge">{esc(c)}</span>' for c in m.get("catalogs", [])
     )
 
-    # Archetype: optional title + tagline, with an optional crest image inlined
-    # as base64 so the HTML stays self-contained.
+    # Archetype: a playful title + tagline (text only).
     arch = payload.get("archetype") or {}
     arch_html = ""
     if arch.get("title"):
-        crest = ""
-        ipath = arch.get("image_path")
-        if ipath:
-            try:
-                import base64 as _b64
-                b = Path(ipath).read_bytes()
-                crest = (
-                    f'<img class="crest" alt="crest" '
-                    f'src="data:image/png;base64,{_b64.b64encode(b).decode()}">'
-                )
-            except OSError:
-                crest = ""
         arch_html = (
             '<div class="archetype">'
-            f'{crest}'
             f'<div class="archtext"><div class="archlabel">Your archetype</div>'
             f'<div class="archtitle">{esc(arch.get("title"))}</div>'
             f'<div class="archtag">{esc(arch.get("tagline", ""))}</div></div>'

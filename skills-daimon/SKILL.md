@@ -275,17 +275,7 @@ Suggested archetypes (extend if a better fit is obvious; keep the tone):
 - **The Orchestrator** — heavy subagent/Task or MCP-tool fan-out.
 - **The Pathfinder** — lots of search/explore (Grep/Glob/Read, codebase tours).
 
-Output for the report: a `title` and a one-line `tagline` grounded in the mix (e.g. *"61% dev, 33% writing — you build it and you document it."*).
-
-### Crest image (optional, network + cost)
-
-If `OPENAI_API_KEY` is set, generate a crest for the title:
-
-```bash
-python3 ~/.claude/skills/skills-daimon/bin/generate_crest.py "<archetype title>" --date <YYYY-MM-DD>
-```
-
-(Plugin: prefer `"$CLAUDE_PLUGIN_ROOT/bin/generate_crest.py"`.) It prints `{"path": "...png"}` on success, or `{"skipped": "no OPENAI_API_KEY"}` / `{"error": ...}`. **This is the only part of skills-daimon that uses the network and costs money** (gpt-image-1, low quality ≈ $0.01–0.02/run). The prompt sent contains **only the archetype title** — never session data. No key → skip the image; the title still shows. If a `path` comes back, pass it as `archetype.image_path` so the renderer inlines it.
+Output for the report: a `title` and a one-line `tagline` grounded in the mix (e.g. *"61% dev, 33% writing — you build it and you document it."*). Title only — no image.
 
 ## Step 6 — Render the HTML companion
 
@@ -293,7 +283,7 @@ After the markdown report is written, generate a self-contained visual version a
 
 1. **Assemble a payload JSON** from the analysis you just produced plus the deterministic counts from the scan. Schema (see `bin/render_report.py` docstring for the authoritative version):
    - `meta`: `{days, sessions, projects, date, catalogs}` (date = today, ISO).
-   - `archetype`: `{title, tagline, image_path}` from Step 5.5. `image_path` only if the crest was generated (omit otherwise — the title still renders in the hero).
+   - `archetype`: `{title, tagline}` from Step 5.5 (text only).
    - `recommendations`: one object per rec — `{rank, confidence: "high"|"med"|"low", type, name, job, evidence, description, install: [cmds], source_url}`.
    - `gaps`: `[{tag, note, init}]` (the "Worth building yourself" list).
    - `coaching`: `[{title, evidence, costs, better}]` (keys unchanged; the renderer labels them What we saw / Why it matters / Try this).

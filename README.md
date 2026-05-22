@@ -17,14 +17,10 @@ If you want to improve your Claude usage, this is the right starting point: it g
 - **Scores** how you work (a Health check: shell-vs-built-in search, risky git, hand-rolled API calls, unsaved repeated prompts) — only where there's a clear better way.
 - **Recommends** matching skills/plugins from every catalog it can reach (local marketplaces, skills.sh, and org/MCP catalogs), weighted by what you actually work on.
 - **Coaches** better habits from the same evidence (native tools over raw shell, safer git, CLAUDE.md, saved commands).
-- **Crowns** you with a playful archetype (e.g. *The Builder-Scribe*), with an optional generated crest image.
+- **Crowns** you with a playful archetype (e.g. *The Builder-Scribe*) based on how you work.
 - **Never invents** a skill — every recommendation comes from a real catalog entry, or it's honestly flagged as a gap.
 
-The scan is deterministic (no LLM): `skills-daimon/bin/scan.py` produces hard counts, and Claude reasons over that JSON. A self-contained HTML report is rendered alongside.
-
-### Optional: the archetype crest image
-
-The only feature that touches the network. If `OPENAI_API_KEY` is set, skills-daimon generates a small crest for your archetype (gpt-image-1, low quality ≈ $0.01–0.02/run). The prompt sent contains **only the archetype title** — never your session data. No key → the title still shows, no image, nothing leaves your machine.
+The scan is deterministic (no LLM): `skills-daimon/bin/scan.py` produces hard counts, and Claude reasons over that JSON. A self-contained HTML report is rendered alongside. Nothing leaves your machine.
 
 ## Install
 
