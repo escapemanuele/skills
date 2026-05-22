@@ -142,7 +142,7 @@ Use this exact template. Keep it scannable. Be specific. Be honest.
 
 📊 **Visual report:** <file:// URL printed by render_report.py> *(open in a browser)*
 
-🏛 **Your archetype: <title>** — <one-line tagline grounded in the mix>.
+🏛  **Your archetype: <title>** — <one-line tagline grounded in the mix>.
 
 Scanned **N sessions** across **M projects**.
 **Skill sources searched** (the marketplaces & registries recommendations can come from): <comma-separated list of `available_catalogs[*].name`, e.g. skills.sh, caveman, claude-plugins-official>.
@@ -156,17 +156,6 @@ Scanned **N sessions** across **M projects**.
 | <basename of path> | <sessions> | <kind> |
 
 (Top 3–5 from `work_recap.top_projects`. Use the path basename, not the full path. This frames the rest of the report — the recommendations below serve this work.)
-
-## Health check
-
-How you're working, scored only where there's a clear better way. Each row = 🟢 good / 🟡 improve / 🔴 change.
-
-| | What we looked at | Now | Verdict |
-|---|---|---|---|
-| 🟡 | File search: shell vs built-in tools | 18% via shell | improve |
-| 🔴 | Risky git commands | 4 in 4 weeks | change |
-
-(One row per `scorecard` item. Same items + thresholds as Step 6. Skip the section if no signal has a quality axis worth scoring.)
 
 ## TL;DR — recommendations
 
@@ -189,12 +178,27 @@ How you're working, scored only where there's a clear better way. Each row = �
 ### 2. ●●○ <job tag>
 ... same shape ...
 
+───────────────
+
 ## Worth building yourself
 
 These are things you do a lot, but no existing skill matches — so you'd make your own.
 
 - **<job tag>** — <one-line: evidence + why no skill matches>. Start one: `npx skills init <name>`
 - **<job tag>** — <one-line: evidence + why no skill matches>. Start one: `npx skills init <name>`
+
+───────────────
+
+## Health check
+
+How you're working, scored only where there's a clear better way. Each row = 🟢 good / 🟡 improve / 🔴 change.
+
+| | What we looked at | Now | Verdict |
+|---|---|---|---|
+| 🟡 | File search: shell vs built-in tools | 18% via shell | improve |
+| 🔴 | Risky git commands | 4 in 4 weeks | change |
+
+(One row per `scorecard` item. Same items + thresholds as Step 6. Skip the section if no signal has a quality axis worth scoring.)
 
 ═══════════════════════════════════════
 
