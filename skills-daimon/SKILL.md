@@ -264,6 +264,11 @@ Build coaching points from these signals (skip any that don't clear the threshol
   - `misunderstood_request` → *"Open with one sentence of context, then the ask."*
   - `user_rejected_action` → *"Have Claude show the plan before making changes."*
   Citation must include **both** denominator and intensity when they differ — e.g. *"wrong_approach in 19 of 57 labeled sessions (33%); 23 total events."*
+  **When `learnings-keeper` is installed**, also call its lookup with the top friction type (and the dominant repo from `work_recap.top_projects`) to surface past notes:
+  ```bash
+  python3 ~/.claude/skills/learnings-keeper/bin/lookup.py --query "<friction_term>" --repo "<repo basename>" --limit 3
+  ```
+  If hits come back, append to the coaching's *Try this* line: *"You wrote a note on this on <date> — see `<title>`."* This is how the loop actually compounds: friction → past lesson surfaced → user reads it.
 
 **Delivery rules:**
 - **Cap at 3 coaching points.** Pick the highest-signal ones. A short, sharp coaching section beats an exhaustive nag.
@@ -315,7 +320,7 @@ After the markdown report is written, generate a self-contained visual version a
    - **Recurring prompt not saved** — recurring prompts (count ≥ 3) with no matching `installed_skills`. Any → warn. `value` = "N prompts". In `explain`, name the fix: *"Say 'turn my <task> prompt into a /command' to save it with the `prompt-to-command` skill"* (prefix with `npx skills add escapemanuele/skills` if it isn't installed).
    - **Outcome — sessions finished** — from `outcomes.by_facet` and `outcomes.coverage`. Compute `(fully_achieved + mostly_achieved) / labeled`. Verdict: `≥85%` → good, `70–85%` → warn, `<70%` → bad. `value` = "<pct>% finished". `note` MUST include coverage: *"<labeled> of <total> sessions labeled"*. Skip the row when `labeled` is 0.
    - **Tool error rate (Bash)** — from `tool_errors.Bash`. Rate = `error / (ok + error)`. Verdict: `<5%` → good, `5–15%` → warn, `≥15%` → bad. `value` = "<pct>% Bash errors", `note` = "<error> of <ok+error> calls".
-   - **Memory usage rate** — `memory_events.sessions_with_memory / session_count`. Verdict: `≥30%` → good, `10–30%` → warn, `<10%` → bad. In `explain`, name the fix: *"After a useful session, just say 'save what we learned' to use the `learnings-keeper` skill"* (once that skill exists; today phrase it as *"use `/remember` more often"*).
+   - **Memory usage rate** — `memory_events.sessions_with_memory / session_count`. Verdict: `≥30%` → good, `10–30%` → warn, `<10%` → bad. In `explain`, name the fix: *"After a useful session, just say **'save what we learned'** — the `learnings-keeper` skill captures it and writes it to your Obsidian vault or a default folder, so the lesson survives the session."* If `learnings-keeper` isn't in `installed_skills`, prefix the line with `npx skills add escapemanuele/skills`.
    Cap the scorecard at ~5 rows. If a signal is clean, you may show it as a `good` row (reassuring) or omit it — prefer showing at least one `good` row when something genuinely is fine.
 2. **Write the payload** to a temp file and run the renderer:
    ```bash
