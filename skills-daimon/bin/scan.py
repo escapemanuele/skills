@@ -23,10 +23,78 @@ import sys
 import time
 from pathlib import Path
 
+# Shared secret-redactor (applied at the write boundary).
+sys.path.insert(0, str(Path(__file__).parent))
+from redact import redact, redact_in  # noqa: E402
+
 
 PROMPT_MAX = 160
 TOP_N = 25
 SUMMARY_CAP_BYTES = 60_000
+
+# --- Outcome / friction / completion (PR α) ---------------------------------
+USAGE_DATA = Path.home() / ".claude" / "usage-data"
+FACETS_DIR = USAGE_DATA / "facets"
+META_DIR = USAGE_DATA / "session-meta"
+
+# Anthropic enum values (raw — pretty labels live in the renderer only).
+OUTCOME_ENUMS = (
+    "fully_achieved", "mostly_achieved", "partially_achieved",
+    "not_achieved", "unclear_from_transcript",
+)
+FRICTION_ENUMS = (
+    "wrong_approach", "buggy_code", "misunderstood_request",
+    "user_rejected_action", "external_blocker", "excessive_changes",
+)
+
+# PR URL detection (for opportunistic gh-pr-detected count)
+PR_URL_RE = re.compile(r"https?://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
+GH_PR_CREATE_RE = re.compile(r"\bgh\s+pr\s+create\b")
+
+# Memory event detection on user content
+MEMORY_REMEMBER_RE = re.compile(r"(?:^|\s)/remember\b", re.IGNORECASE)
+MEMORY_PATH_HINTS = ("/.claude/memory", "/.claude/projects/", "MEMORY.md")
+
+
+def load_facet(session_id: str) -> dict | None:
+    """Read ~/.claude/usage-data/facets/<session_id>.json if present."""
+    p = FACETS_DIR / f"{session_id}.json"
+    try:
+        return json.loads(p.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def load_session_meta(session_id: str) -> dict | None:
+    """Read ~/.claude/usage-data/session-meta/<session_id>.json if present."""
+    p = META_DIR / f"{session_id}.json"
+    try:
+        return json.loads(p.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def session_id_from_path(path: Path) -> str:
+    """Session UUID from the jsonl filename."""
+    return path.stem
+
+
+def tool_results_from_user(message) -> list[dict]:
+    """Pull tool_result blocks out of a user-type event's message.content."""
+    out = []
+    msg = message.get("message") or {}
+    content = msg.get("content")
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                out.append(block)
+    return out
+
+
+def is_memory_path(p: str | None) -> bool:
+    if not p:
+        return False
+    return any(h in p for h in MEMORY_PATH_HINTS) or p.endswith("/MEMORY.md")
 
 IGNORED_FILE = Path.home() / ".claude" / "skills" / "skills-daimon" / ".ignored.json"
 
@@ -494,9 +562,84 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
     work_mix = collections.Counter()           # global: dev/data/writing/ops
     proj_signal: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
 
+    # --- PR α: outcomes (from facets), completion (from session-meta),
+    #         tool errors (via tool_use_id→name), memory events, gh-PR ----
+    outcomes_by_facet = collections.Counter()
+    friction_sessions = collections.Counter()       # session-incidence per friction
+    friction_counts_sum = collections.Counter()     # summed raw counts per friction
+    primary_success_top = collections.Counter()
+    session_type_mix = collections.Counter()
+    helpfulness_mix = collections.Counter()
+    outcomes_labeled = 0                            # sessions with a readable facet
+
+    completion_commits = 0
+    completion_pushes = 0
+    completion_lines_added = 0
+    completion_lines_removed = 0
+    completion_files_modified = 0
+    completion_with_meta = 0
+    proj_commits = collections.Counter()
+    proj_pushes = collections.Counter()
+
+    tool_errors_ok = collections.Counter()
+    tool_errors_err = collections.Counter()
+
+    memory_remember = 0
+    memory_edits = 0
+    memory_sessions = 0
+
+    prs_via_gh_create = 0
+    prs_via_url = 0
+
     for project, path, mtime in iter_session_files(root, max_age_days):
         session_user_msgs = 0
         session_bash = 0
+        sid = session_id_from_path(path)
+
+        # Outcomes (facets/<sid>.json) — may be missing (lag is normal); silent skip.
+        facet = load_facet(sid)
+        if isinstance(facet, dict):
+            outcomes_labeled += 1
+            oc = facet.get("outcome")
+            if isinstance(oc, str):
+                outcomes_by_facet[oc] += 1
+            ps = facet.get("primary_success")
+            if isinstance(ps, str) and ps:
+                primary_success_top[ps] += 1
+            st = facet.get("session_type")
+            if isinstance(st, str) and st:
+                session_type_mix[st] += 1
+            ch = facet.get("claude_helpfulness")
+            if isinstance(ch, str) and ch:
+                helpfulness_mix[ch] += 1
+            fc = facet.get("friction_counts") or {}
+            if isinstance(fc, dict):
+                for k, v in fc.items():
+                    if not isinstance(v, (int, float)) or v <= 0:
+                        continue
+                    friction_sessions[k] += 1          # incidence: session had it
+                    friction_counts_sum[k] += int(v)   # intensity: total events
+
+        # Completion (session-meta/<sid>.json) — may also be missing.
+        meta = load_session_meta(sid)
+        if isinstance(meta, dict):
+            completion_with_meta += 1
+            gc = int(meta.get("git_commits") or 0)
+            gp = int(meta.get("git_pushes") or 0)
+            if gc > 0:
+                completion_commits += 1
+                proj_commits[project] += gc
+            if gp > 0:
+                completion_pushes += 1
+                proj_pushes[project] += gp
+            completion_lines_added += int(meta.get("lines_added") or 0)
+            completion_lines_removed += int(meta.get("lines_removed") or 0)
+            completion_files_modified += int(meta.get("files_modified") or 0)
+
+        # Per-session maps reset.
+        tool_use_id_to_name: dict[str, str] = {}
+        session_has_memory = False
+
         try:
             with path.open() as fh:
                 for line in fh:
@@ -517,12 +660,37 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                     typ = ev.get("type")
                     if typ == "user":
                         msg = ev.get("message") or {}
+                        # tool_result blocks → bucket errors by mapped tool name
+                        # + scan their text for PR URLs (opportunistic, labeled).
+                        for tr in tool_results_from_user(ev):
+                            tu_id = tr.get("tool_use_id") or ""
+                            tname = tool_use_id_to_name.get(tu_id, "?")
+                            if tr.get("is_error") is True:
+                                tool_errors_err[tname] += 1
+                            else:
+                                tool_errors_ok[tname] += 1
+                            rc = tr.get("content")
+                            if isinstance(rc, str):
+                                rt = rc
+                            elif isinstance(rc, list):
+                                rt = " ".join(
+                                    b.get("text", "") for b in rc
+                                    if isinstance(b, dict) and b.get("type") == "text"
+                                )
+                            else:
+                                rt = ""
+                            if rt and PR_URL_RE.search(rt):
+                                prs_via_url += 1
                         text = content_to_text(msg.get("content"))
                         if not is_caveat_or_system(text):
                             session_user_msgs += 1
                             normalized = normalize_prompt(text)
                             if normalized:
                                 prompt_counter[normalized] += 1
+                            # /remember invocation in user content
+                            if text and MEMORY_REMEMBER_RE.search(text):
+                                memory_remember += 1
+                                session_has_memory = True
                     elif typ == "assistant":
                         # Per-project token volume (input+output) for the work recap.
                         msg = ev.get("message") or {}
@@ -535,11 +703,20 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                         for tu in tool_uses_from_assistant(ev):
                             name = tu.get("name", "?")
                             tool_uses[name] += 1
+                            # Record id→name so user-side tool_result blocks
+                            # can be bucketed by tool name later.
+                            tu_id = tu.get("id")
+                            if tu_id:
+                                tool_use_id_to_name[tu_id] = name
                             # Work-recap classification (one bucket per tool use).
                             # Write/Edit count as dev unless the file is prose/docs.
                             if name in ("Write", "Edit", "NotebookEdit"):
                                 inp = tu.get("input") or {}
                                 fp = inp.get("file_path") or inp.get("notebook_path") or ""
+                                # Memory event: explicit edit to a memory path
+                                if is_memory_path(fp):
+                                    memory_edits += 1
+                                    session_has_memory = True
                                 ext = fp.rsplit(".", 1)[-1].lower() if "." in fp else ""
                                 bucket = "writing" if ext in PROSE_EXT else "dev"
                                 work_mix[bucket] += 1
@@ -585,6 +762,9 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                                 m = CURL_HOST_RE.search(cmd)
                                 if m:
                                     curl_hosts[m.group(1)] += 1
+                                # gh pr create — opportunistic PR detection
+                                if GH_PR_CREATE_RE.search(cmd):
+                                    prs_via_gh_create += 1
                             elif name == "WebFetch":
                                 web_fetches += 1
                             elif name.startswith("mcp__"):
@@ -594,6 +774,8 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
             continue
 
         project_counts[project] += 1
+        if session_has_memory:
+            memory_sessions += 1
         sessions.append(
             {
                 "project": project,
@@ -676,6 +858,8 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
             "tokens": proj_tokens.get(proj, 0),
             "kind": kind,
             "branch": proj_branch.get(proj),
+            "commits": int(proj_commits.get(proj, 0)),
+            "pushes": int(proj_pushes.get(proj, 0)),
         })
     mix_total = sum(work_mix.values())
     work_recap = {
@@ -684,6 +868,39 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
             k: round(100 * v / mix_total)
             for k, v in work_mix.most_common()
         } if mix_total else {},
+    }
+
+    # --- PR α: outcomes / completion / tool_errors / memory_events --------
+    total_sessions = len(sessions)
+    outcomes = {
+        "by_facet": dict(outcomes_by_facet),
+        "friction_sessions": dict(friction_sessions.most_common()),
+        "friction_counts_sum": dict(friction_counts_sum.most_common()),
+        "primary_success_top": dict(primary_success_top.most_common()),
+        "session_type_mix": dict(session_type_mix.most_common()),
+        "helpfulness_mix": dict(helpfulness_mix.most_common()),
+        "coverage": {"labeled": outcomes_labeled, "total": total_sessions},
+    }
+    completion = {
+        "sessions_with_commit": completion_commits,
+        "sessions_with_push": completion_pushes,
+        "lines_added": completion_lines_added,
+        "lines_removed": completion_lines_removed,
+        "files_modified": completion_files_modified,
+        "prs_detected_via_gh": {
+            "gh_pr_create": prs_via_gh_create,
+            "pr_url_in_results": prs_via_url,
+        },
+        "coverage": {"with_meta": completion_with_meta, "total": total_sessions},
+    }
+    tool_errors = {
+        name: {"ok": tool_errors_ok.get(name, 0), "error": tool_errors_err.get(name, 0)}
+        for name in sorted(set(tool_errors_ok) | set(tool_errors_err))
+    }
+    memory_events = {
+        "remember_invocations": memory_remember,
+        "memory_file_edits": memory_edits,
+        "sessions_with_memory": memory_sessions,
     }
 
     # Catalog probing is expensive (cold path can run ~1 min on machines with
@@ -723,7 +940,16 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
         "ignored_names": load_ignored(),
         "coaching_signals": coaching_signals,
         "work_recap": work_recap,
+        "outcomes": outcomes,
+        "completion": completion,
+        "tool_errors": tool_errors,
+        "memory_events": memory_events,
     }
+
+    # Redact at the write boundary: walk the whole summary and mask plausible
+    # secrets in every string leaf. Catches anything in bash_verb_samples,
+    # destructive_samples, raw_http_hosts, recurring prompts, etc.
+    summary = redact_in(summary)
 
     serialized = json.dumps(summary)
     if len(serialized) > SUMMARY_CAP_BYTES:
