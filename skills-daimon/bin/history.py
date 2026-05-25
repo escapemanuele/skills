@@ -66,6 +66,12 @@ def _scrub_snapshot(snap: dict) -> dict:
             str(k): int(v) for k, v in (snap.get("work_mix") or {}).items()
             if isinstance(v, _NUMERIC)
         },
+        # `game` is numeric-only (see gamify.numeric_game_history_snapshot).
+        # Non-numeric values are dropped silently here as defense in depth.
+        "game": {
+            str(k): v for k, v in (snap.get("game") or {}).items()
+            if isinstance(v, _NUMERIC)
+        },
     }
     return redact_in(out)
 

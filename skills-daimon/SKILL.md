@@ -471,7 +471,8 @@ Build a snapshot like:
     "unsaved_prompts": <int>
   },
   "archetype": "<title>",
-  "work_mix": { "dev": <pct>, "writing": <pct>, "data": <pct>, "ops": <pct> }
+  "work_mix": { "dev": <pct>, "writing": <pct>, "data": <pct>, "ops": <pct> },
+  "game": { /* numeric-only gamify snapshot, see below */ }
 }
 ```
 
@@ -482,6 +483,26 @@ python3 ~/.claude/skills/skills-daimon/bin/history.py append < /tmp/skills-daimo
 ```
 
 `(date, window_days)` is the dedupe key — same-day reruns **overwrite** the entry, so the sparkline never shows fake movement.
+
+### The Daimon Grove block (`game`, numeric only)
+
+When gamify is in use, append a `game` sub-object containing **only the numeric snapshot from `gamify.numeric_game_history_snapshot(state)`** — never raw quest titles, badge names, or evidence strings. The history file enforces this (non-numeric values are dropped); follow it in the snapshot you write too.
+
+```bash
+python3 - <<'PY'
+import json, sys, pathlib
+sys.path.insert(0, str(pathlib.Path.home() / ".claude/skills/skills-daimon/bin"))
+import gamify, json
+analysis = json.load(open("/tmp/sd-payload.json"))
+state = gamify.build_game_state(analysis, history_snapshots=None, today="<YYYY-MM-DD>", window_days=28)
+snap = {"date": "<YYYY-MM-DD>", "window_days": 28, "sessions": ..., "labeled": ...,
+        "scorecard": {...}, "archetype": "...", "work_mix": {...},
+        "game": gamify.numeric_game_history_snapshot(state)}
+json.dump(snap, sys.stdout)
+PY
+```
+
+XP is awarded only when the *next* run verifies an improvement vs the prior distinct day; running the report on the same day a second time does not double-award. Weak signals never subtract XP.
 
 ### Stuck-loop coaching (when `stuck_loops` non-empty)
 

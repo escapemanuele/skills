@@ -514,6 +514,37 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .trust .trust-title{font-size:15px;margin:0 0 8px;color:%(INK)s}
 .trust-list{margin:0;padding:0 0 0 18px;color:#374151;font-size:13.5px;line-height:1.55}
 .trust-list li{margin:4px 0}
+/* daimon level chip (inside archetype card) */
+.daimon-chip{display:inline-flex;align-items:center;gap:6px;float:right;
+  background:%(ACCENT_SOFT)s;color:%(ACCENT)s;border:1px solid %(GAP)s;
+  border-radius:999px;padding:4px 10px;font-size:12px;font-weight:600}
+.daimon-chip .dc-val{font-size:14px;font-weight:800;margin:0 2px}
+.daimon-chip .dc-xp{opacity:.75;font-weight:500}
+/* quest card */
+.quest{border-left:5px solid %(INFO)s;background:#F8FAFF}
+.quest-tag{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:%(INFO)s;
+  font-weight:700;margin-bottom:6px}
+.quest-title{margin:0 0 8px;font-size:18px;font-weight:700;color:%(INK)s}
+.quest-why{margin:6px 0;color:#374151}
+.quest-do{margin:8px 0}
+.quest-do-label{font-size:11px;font-weight:700;color:%(INFO)s;text-transform:uppercase;letter-spacing:.5px}
+.quest-do code{display:inline-block;margin-left:6px}
+.quest-reward{margin:10px 0 0;color:#374151;font-size:13.5px}
+.quest-note{color:%(MUTED)s;font-size:12px}
+/* grove */
+.grove-card{padding:14px 18px}
+.grove-card svg{display:block;margin:0 auto 8px}
+.grove-tracks{width:100%%;border-collapse:collapse;font-size:13.5px;margin:8px 0 6px}
+.grove-tracks th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+  color:%(MUTED)s;border-bottom:1px solid %(GAP)s;padding:6px 8px}
+.grove-tracks td{padding:6px 8px;border-bottom:1px solid #f1f2f5}
+.grove-tracks td.num,.grove-tracks th.num{text-align:right;font-variant-numeric:tabular-nums}
+.grove-ev{color:%(MUTED)s;font-size:13px}
+.delta-flat{color:%(MUTED)s}
+.grove-badges{margin-top:8px;display:flex;flex-wrap:wrap;gap:8px}
+.grove-badge{font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid %(GAP)s}
+.grove-badge.on{background:#ECFDF5;border-color:#A7F3D0;color:%(GOOD)s;font-weight:600}
+.grove-badge.off{color:%(MUTED)s;background:#fff}
 /* catalog source strip (outside the hero now) */
 .srcstrip{padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .srclabel-dark{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
@@ -549,6 +580,89 @@ footer{margin-top:40px;color:%(MUTED)s;font-size:12px;text-align:center}
 }
 
 
+def _gamify_blocks(payload: dict, m: dict):
+    """Return (level_chip_html, quest_card_html, grove_section_html) — empty
+    strings if gamification is unavailable. Pulls fresh history so deltas
+    are honest. Never raises into the renderer."""
+    try:
+        import gamify as _gamify    # type: ignore
+        import history as _history  # type: ignore
+    except Exception:
+        return "", "", ""
+    try:
+        entries = _history.read_last(8, window_days=int(m.get("days") or 0) or None)
+    except Exception:
+        entries = []
+    try:
+        gs = _gamify.build_game_state(payload, entries, today=m.get("date"),
+                                       window_days=m.get("days"))
+    except Exception:
+        return "", "", ""
+
+    # Top: a compact Daimon Level chip next to the archetype.
+    level_chip = (
+        f'<div class="daimon-chip" title="Daimon Level">'
+        f'<span class="dc-label">Daimon Level</span>'
+        f'<span class="dc-val">{int(gs["daimon_level"])}</span>'
+        f'<span class="dc-xp">· {int(gs["xp_total"])} XP</span>'
+        f'</div>'
+    )
+
+    # Quest card (after primary action).
+    quest = gs.get("active_quest")
+    if quest:
+        quest_html = (
+            '<section class="quest card">'
+            '<div class="quest-tag">⚜ Quest offered</div>'
+            f'<h2 class="quest-title">{esc(quest.get("title"))}</h2>'
+            f'<p class="quest-why">{esc(quest.get("why",""))}</p>'
+            f'<div class="quest-do"><span class="quest-do-label">Do</span>'
+            f' <code>{esc(quest.get("do",""))}</code></div>'
+            f'<p class="quest-reward"><b>Reward.</b> {esc(quest.get("reward",""))} '
+            '<span class="quest-note">(XP is awarded only when the next scan verifies the improvement.)</span></p>'
+            '</section>'
+        )
+    else:
+        quest_html = ""
+
+    # Grove + XP movements (near trends, below activity bars).
+    earned = sum(1 for b in gs.get("badges", []) if b.get("earned"))
+    track_rows = []
+    for tname, t in gs["tracks"].items():
+        delta = int(t["delta"])
+        delta_html = (
+            f'<span class="delta down">+{delta}</span>' if delta > 0
+            else '<span class="delta-flat">·</span>'
+        )
+        track_rows.append(
+            f'<tr><td>{esc(tname)}</td>'
+            f'<td class="num">L{int(t["level"])}</td>'
+            f'<td class="num">{int(t["xp"])} XP</td>'
+            f'<td class="num">{delta_html}</td>'
+            f'<td class="grove-ev">{esc(t.get("evidence",""))}</td></tr>'
+        )
+    badges_html = " · ".join(
+        f'<span class="grove-badge {"on" if b["earned"] else "off"}">{esc(b["name"])}</span>'
+        for b in gs.get("badges", [])
+    )
+    grove_html = (
+        '<h2 class="sec">🌲 Daimon Grove</h2>'
+        '<p class="seclead">Conservative gamification. XP is only awarded when the next scan verifies the improvement — never just for running the report.</p>'
+        '<div class="card grove-card">'
+        f'{_gamify.render_grove_svg(gs["grove"])}'
+        '<table class="grove-tracks">'
+        '<thead><tr><th>Track</th><th class="num">Level</th><th class="num">XP</th>'
+        '<th class="num">Δ this run</th><th>Evidence</th></tr></thead>'
+        f'<tbody>{"".join(track_rows)}</tbody></table>'
+        f'<div class="grove-badges">{badges_html}</div>'
+        f'<p class="cap">Badges earned: {earned} · Quests offered: {int(gs.get("quests_offered_count",0))} · '
+        f'Quests verified: {int(gs.get("quests_completed_count",0))}</p>'
+        '</div>'
+    )
+
+    return level_chip, quest_html, grove_html
+
+
 def render(payload: dict) -> str:
     m = payload.get("meta", {})
     recs = payload.get("recommendations", [])
@@ -556,6 +670,8 @@ def render(payload: dict) -> str:
     coaching = payload.get("coaching", [])
     charts = payload.get("charts", {})
     work_recap = payload.get("work_recap", {})
+
+    level_chip_html, quest_html, grove_html = _gamify_blocks(payload, m)
 
     # ─── HERO VERDICT (replaces the old hero/title) ────────────────────────
     hero_html = hero_verdict_card(payload.get("verdict") or {}, m)
@@ -573,8 +689,17 @@ def render(payload: dict) -> str:
             '</section>'
         )
 
-    # ─── ARCHETYPE CARD (5-part) ───────────────────────────────────────────
-    arch_html = archetype_card(payload.get("archetype") or {})
+    # ─── ARCHETYPE CARD (5-part) + Daimon Level chip ───────────────────────
+    arch_inner = archetype_card(payload.get("archetype") or {})
+    if arch_inner and level_chip_html:
+        # Inject the level chip right after the opening section tag.
+        arch_html = arch_inner.replace(
+            '<section class="archetype-card card">',
+            '<section class="archetype-card card">' + level_chip_html,
+            1,
+        )
+    else:
+        arch_html = arch_inner
 
     # ─── PRIMARY ACTION CARD ───────────────────────────────────────────────
     pa_html = primary_action_card(payload.get("primary_action") or {})
@@ -658,6 +783,7 @@ def render(payload: dict) -> str:
         + hero_html
         + arch_html
         + pa_html
+        + quest_html        # the one active quest, right after the primary action
         + catalog_strip
         + recs_html         # main focus, immediately after the primary action
         + recap_html
@@ -665,6 +791,7 @@ def render(payload: dict) -> str:
         + gaps_html
         + coach_html
         + charts_html
+        + grove_html        # Daimon Grove: gamification stays below the evidence
         + '<footer>🏛 Generated by <b>Skills Daimon</b> · evidence from your own '
           'Claude Code sessions · nothing left this machine 🔒</footer>'
         "</div></body></html>"
