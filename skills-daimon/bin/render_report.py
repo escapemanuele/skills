@@ -93,15 +93,60 @@ def bar_chart(data: dict, title: str, top: int = 10, color: str = BAR) -> str:
 VERDICT_LABEL = {"good": "✓ good", "warn": "↑ improve", "bad": "↑ change"}
 
 
-def scorecard_strip(items: list) -> str:
-    """Health-check rows. Each item: {label, value, verdict, note}.
+def _fmt_num(v):
+    """Compact number rendering for sparkline tooltips and deltas."""
+    if isinstance(v, float):
+        return f"{v:.1f}".rstrip("0").rstrip(".") or "0"
+    return str(v)
 
-    `verdict` is one of good / warn / bad (Claude applies the judgment; the
-    renderer just colors it). Only signals with a clear better direction belong
-    here — never raw counts that have no good/bad.
+
+def sparkline(values, w=72, h=18) -> str:
+    """Inline-SVG sparkline. Requires ≥3 distinct points or returns empty."""
+    if not values or len(values) < 3:
+        return ""
+    lo, hi = min(values), max(values)
+    rng = max(1, hi - lo)
+    n = len(values)
+    pts = []
+    for i, v in enumerate(values):
+        x = i * (w - 2) / (n - 1) + 1
+        y = h - 2 - (v - lo) * (h - 4) / rng
+        pts.append(f"{x:.1f},{y:.1f}")
+    poly = " ".join(pts)
+    return (
+        f'<svg class="sline" viewBox="0 0 {w} {h}" width="{w}" height="{h}" '
+        f'role="img"><polyline fill="none" stroke="currentColor" '
+        f'stroke-width="1.5" points="{poly}"/></svg>'
+    )
+
+
+def _delta_html(values: list, current) -> str:
+    """\"up from 10\" delta vs the most recent distinct prior value."""
+    if not values or current is None:
+        return ""
+    prior = None
+    for v in reversed(values[:-1]):  # exclude current run if present
+        if v != current and v is not None:
+            prior = v
+            break
+    if prior is None or prior == current:
+        return ""
+    try:
+        arrow = "↑" if current > prior else "↓"
+    except TypeError:
+        return ""
+    cls = "up" if current > prior else "down"
+    return f' <span class="delta {cls}">{arrow} from {_fmt_num(prior)}</span>'
+
+
+def scorecard_strip(items: list, history_by_key: dict | None = None) -> str:
+    """Health-check rows. Each item: {label, value, verdict, note, explain,
+    history_key?, current_number?}. Sparkline + delta render when the row
+    carries a `history_key` and ≥3 prior days exist for that key.
     """
     if not items:
         return ""
+    history_by_key = history_by_key or {}
     rows = []
     for it in items:
         v = it.get("verdict", "warn")
@@ -111,12 +156,19 @@ def scorecard_strip(items: list) -> str:
         body = note
         if explain:
             body += f'<div class="scexplain">{explain}</div>'
+        # Trend bits (only when history has the key)
+        key = it.get("history_key")
+        series = history_by_key.get(key) if key else None
+        spark = sparkline(series) if series else ""
+        cur = it.get("current_number")
+        delta = _delta_html(series, cur) if series and cur is not None else ""
         rows.append(
             '<details class="scrow">'
             '<summary>'
             '<span class="scchev">▸</span>'
             f'<div class="scmain"><div class="sclabel">{esc(it.get("label", ""))}</div></div>'
-            f'<div class="scval">{esc(it.get("value", ""))}</div>'
+            f'<div class="scval">{esc(it.get("value", ""))}{delta}</div>'
+            f'<div class="scspark">{spark}</div>'
             f'<span class="verdict {esc(v)}">{vlabel}</span>'
             '</summary>'
             f'<div class="scbody">{body}</div>'
@@ -293,6 +345,10 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .scmain{flex:1;min-width:0}
 .sclabel{font-weight:600;font-size:15px}
 .scval{font-variant-numeric:tabular-nums;font-weight:700;font-size:15px;white-space:nowrap;color:%(MUTED)s}
+.scspark{color:%(ACCENT)s;opacity:.85;flex-shrink:0;min-width:72px;text-align:right}
+.delta{font-size:12px;font-weight:600;margin-left:6px}
+.delta.up{color:#dc2626}
+.delta.down{color:#16a34a}
 .scrow .verdict{margin:0;flex-shrink:0}
 .scbody{padding:0 0 16px 24px;color:#374151;font-size:13.5px;line-height:1.55}
 .scexplain{margin-top:8px;padding:10px 12px;background:#f7f8fb;border-radius:8px;color:%(INK)s}
@@ -369,10 +425,24 @@ def render(payload: dict) -> str:
 
     # Health-check scorecard (payload-driven; each item carries its own verdict)
     scorecard = payload.get("scorecard", [])
+    # Read history for sparklines + deltas (silent if file is missing/short).
+    history_by_key: dict[str, list] = {}
+    try:
+        import history as _history  # type: ignore
+        entries = _history.read_last(8, window_days=int(m.get("days") or 0) or None)
+        # Build per-key series in chronological order from entries' scorecard.
+        for e in entries:
+            sc = e.get("scorecard") or {}
+            for k, v in sc.items():
+                if isinstance(v, (int, float)):
+                    history_by_key.setdefault(k, []).append(v)
+    except Exception:
+        history_by_key = {}
+
     scorecard_html = (
         '<h2 class="sec">🩺 Health check</h2>'
         '<p class="seclead">How you\'re working, scored where there\'s a clear better way.</p>'
-        + scorecard_strip(scorecard)
+        + scorecard_strip(scorecard, history_by_key)
         if scorecard else ""
     )
 

@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
 import json
 import os
 import re
 import sys
 import time
+from datetime import datetime as _dt
 from pathlib import Path
 
 # Shared secret-redactor (applied at the write boundary).
@@ -95,6 +97,28 @@ def is_memory_path(p: str | None) -> bool:
     if not p:
         return False
     return any(h in p for h in MEMORY_PATH_HINTS) or p.endswith("/MEMORY.md")
+
+
+# --- Stuck-loop helpers (PR β) ----------------------------------------------
+STUCK_GAP_SECONDS = 120
+
+
+def _parse_ts(s: str):
+    try:
+        return _dt.fromisoformat((s or "").replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _sha8(s: str) -> str:
+    return hashlib.sha1(s.encode("utf-8", "ignore")).hexdigest()[:8]
+
+
+def _cmd_summary(cmd: str) -> str:
+    """Short, redaction-friendly preview of a stuck command (3 words max)."""
+    parts = cmd.strip().split()
+    head = " ".join(parts[:3])[:40]
+    return head + " …" if len(parts) > 3 else head
 
 IGNORED_FILE = Path.home() / ".claude" / "skills" / "skills-daimon" / ".ignored.json"
 
@@ -591,6 +615,10 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
     prs_via_gh_create = 0
     prs_via_url = 0
 
+    # --- PR β: stuck-loop detection (per session). Raw command is kept ONLY
+    #          for this current run's emit; nothing here lands in history.jsonl.
+    stuck_loops: list[dict] = []
+
     for project, path, mtime in iter_session_files(root, max_age_days):
         session_user_msgs = 0
         session_bash = 0
@@ -639,6 +667,8 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
         # Per-session maps reset.
         tool_use_id_to_name: dict[str, str] = {}
         session_has_memory = False
+        # (timestamp ISO, command_string) per Bash use — for stuck-loop detection.
+        session_bash_events: list[tuple[str, str]] = []
 
         try:
             with path.open() as fh:
@@ -733,6 +763,11 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                                 session_bash += 1
                                 total_bash += 1
                                 cmd = (tu.get("input") or {}).get("command", "")
+                                # Stuck-loop input: keep (timestamp, cmd) — raw
+                                # cmd stays only in this scan; never in history.
+                                ts = ev.get("timestamp") or ""
+                                if cmd:
+                                    session_bash_events.append((ts, cmd))
                                 verb = extract_bash_verb(cmd)
                                 if verb:
                                     bash_verbs[verb] += 1
@@ -776,6 +811,37 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
         project_counts[project] += 1
         if session_has_memory:
             memory_sessions += 1
+
+        # --- Stuck-loop runs in this session: ≥3 identical Bash commands in a
+        # row with ≤2 min between consecutive calls. Honest polling is dropped
+        # by the gap rule (deploys, CI watches usually wait longer).
+        if len(session_bash_events) >= 3:
+            run_start = 0
+            while run_start < len(session_bash_events):
+                cmd = session_bash_events[run_start][1]
+                run_end = run_start + 1
+                while run_end < len(session_bash_events):
+                    if session_bash_events[run_end][1] != cmd:
+                        break
+                    tp = _parse_ts(session_bash_events[run_end - 1][0])
+                    tc = _parse_ts(session_bash_events[run_end][0])
+                    gap = (tc - tp).total_seconds() if (tp and tc) else 0
+                    if gap > STUCK_GAP_SECONDS:
+                        break
+                    run_end += 1
+                length = run_end - run_start
+                if length >= 3:
+                    stuck_loops.append({
+                        "command_hash": _sha8(cmd),
+                        "command_summary": _cmd_summary(cmd),
+                        "command": cmd[:SAMPLE_CMD_MAX_LEN],  # current run only; redactor masks
+                        "count": length,
+                        "session": sid,
+                        "first_ts": session_bash_events[run_start][0],
+                        "last_ts": session_bash_events[run_end - 1][0],
+                    })
+                run_start = run_end if run_end > run_start else run_start + 1
+
         sessions.append(
             {
                 "project": project,
@@ -944,6 +1010,7 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
         "completion": completion,
         "tool_errors": tool_errors,
         "memory_events": memory_events,
+        "stuck_loops": stuck_loops,
     }
 
     # Redact at the write boundary: walk the whole summary and mask plausible

@@ -305,7 +305,7 @@ After the markdown report is written, generate a self-contained visual version a
    - `gaps`: `[{tag, note, init}]` (the "Worth building yourself" list).
    - `coaching`: `[{title, evidence, costs, better}]` (keys unchanged; the renderer labels them What we saw / Why it matters / Try this).
    - `work_recap`: pass `work_recap` straight from the scan JSON (drives the "What you've been working on" strip).
-   - `scorecard`: `[{label, value, verdict, note, explain}]` — the **Health check** (see below). `verdict` is one of `good` / `warn` / `bad`; the renderer colors it (green / amber / red). Each row is **expandable** (`<details>`): the collapsed summary shows `label` + `value` + verdict; expanding reveals `note` then `explain`. `explain` = 1–2 plain sentences a non-expert understands ("Searching with shell commands like `grep` is slower and gives messier results than Claude's built-in search. Using the built-in tools is faster and cleaner."). **Only include signals that have a clear better direction** — never raw counts.
+   - `scorecard`: `[{label, value, verdict, note, explain, history_key?, current_number?}]` — the **Health check** (see below). `verdict` is one of `good` / `warn` / `bad`; the renderer colors it (green / amber / red). Each row is **expandable** (`<details>`): the collapsed summary shows `label` + `value` + verdict; expanding reveals `note` then `explain`. `explain` = 1–2 plain sentences a non-expert understands. `history_key` (optional) lets the renderer draw a sparkline + delta from `history.jsonl` (see Step 7); supply the same key in the snapshot's `scorecard` map and the row's `current_number` (numeric, plain — e.g. `17` for "17% via shell"). **Only include signals that have a clear better direction** — never raw counts.
    - `charts`: context-only bars — `{tool_use_top, bash_verbs_top}` straight from the scan JSON. These render at the bottom under "just for context" with no verdict (raw counts have no good/bad).
 
    **Building the scorecard.** Score each signal that has a quality axis; skip any with no data. Use these thresholds:
@@ -325,6 +325,51 @@ After the markdown report is written, generate a self-contained visual version a
 3. **Link it at the very top** of the markdown report using the printed `url` (a `file://` URL the user opens in a browser). If rendering fails for any reason, skip the link silently — the markdown report stands on its own.
 
 The HTML is fully self-contained (inline CSS + inline SVG charts, no network) so it opens offline and nothing leaves the machine.
+
+## Step 7 — Append the snapshot to history (for trends)
+
+After rendering, write a tiny snapshot to `history.jsonl` so the next run can draw trends. **Numbers only — no command strings, no paths, no session IDs.**
+
+Build a snapshot like:
+
+```json
+{
+  "date": "<YYYY-MM-DD>",
+  "window_days": <28>,
+  "sessions": <N>,
+  "labeled": <outcomes.coverage.labeled>,
+  "scorecard": {
+    "outcome_finished_pct": <int>,
+    "bash_error_pct": <float>,
+    "memory_rate_pct": <int>,
+    "search_shell_pct": <int>,
+    "risky_git_count": <int>,
+    "claudemd_missing": <int>,
+    "unsaved_prompts": <int>
+  },
+  "archetype": "<title>",
+  "work_mix": { "dev": <pct>, "writing": <pct>, "data": <pct>, "ops": <pct> }
+}
+```
+
+Keys in `scorecard` must match the `history_key` field on the corresponding scorecard rows (so the renderer can join them). Then:
+
+```bash
+python3 ~/.claude/skills/skills-daimon/bin/history.py append < /tmp/skills-daimon-snapshot.json
+```
+
+`(date, window_days)` is the dedupe key — same-day reruns **overwrite** the entry, so the sparkline never shows fake movement.
+
+### Stuck-loop coaching (when `stuck_loops` non-empty)
+
+The scanner emits `stuck_loops: [{command_hash, command_summary, command, count, session, first_ts, last_ts}]` for runs of ≥3 identical Bash commands with ≤2 min between calls. Each is a likely "I got stuck" signal (polling has larger gaps and is excluded).
+
+Surface the highest-`count` entry as one of the coaching points when present:
+- **What we saw:** "You ran `<command_summary>` <count>× in a few minutes in one session."
+- **Why it matters:** "Usually means stuck — same command, no result, run again."
+- **Try this:** "When that happens, change the question, not the count: read the error properly, or try a different angle."
+
+**Privacy:** `stuck_loops[].command` exists for this run's coaching only. Do **not** include it in the history snapshot. The renderer keeps the redacted command summary visible; the raw command can appear in the markdown report this run, but never in `history.jsonl`.
 
 ## Failure modes to watch for
 
