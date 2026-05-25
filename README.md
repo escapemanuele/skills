@@ -52,17 +52,28 @@ This repo is the `skills-daimon` Claude Code plugin (`.claude-plugin/plugin.json
 
 - **skills-daimon** — the usage report: recap, recommendations, health check, coaching, archetype.
 - **prompt-to-command** — turn a prompt you keep retyping into a saved slash command. Pairs with the report: skills-daimon *finds* the repeated prompt; this one *fixes* it.
+- **learnings-keeper** — save what you figured out in a session as plain markdown (Obsidian vault or default folder), and look it up later when a similar problem comes around. Pairs with the report: skills-daimon *flags* low memory usage; this one *captures and resurfaces* lessons across sessions.
 
 ```
 skills/                          # repo (escapemanuele/skills)
 ├── .claude-plugin/plugin.json   # plugin "skills-daimon" + its skill paths
 ├── skills-daimon/
-│   ├── SKILL.md                 # instructions Claude follows
+│   ├── SKILL.md
 │   └── bin/
 │       ├── scan.py              # deterministic session scanner
-│       └── render_report.py     # self-contained HTML report renderer
-└── prompt-to-command/
-    └── SKILL.md
+│       ├── render_report.py     # self-contained HTML report renderer
+│       ├── history.py           # trends (counts only, no PII)
+│       └── redact.py            # shared secret scrubber
+├── prompt-to-command/
+│   └── SKILL.md
+└── learnings-keeper/
+    ├── SKILL.md
+    └── bin/
+        ├── store.py             # store config + Obsidian autodetect
+        ├── extract.py           # candidate-notes extractor
+        ├── save.py              # write a learning note (redacted)
+        ├── lookup.py            # search past learnings
+        └── redact.py            # vendored secret scrubber
 ```
 
 ## License
