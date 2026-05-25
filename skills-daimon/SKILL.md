@@ -237,6 +237,36 @@ Say:
 
 ---
 
+## ✨ Catalog-backed recommendations
+
+Skills the user can install, drawn only from real catalog hits. **Catalog-verified, never generated.** **Always render the full detail in markdown too — not just in HTML — including the TL;DR table and the numbered cards below.**
+
+| Type | Name | Matches | Why |
+|---|---|---|---|
+| <type> | [<name>](<source_url>) | <job tag> | <≤10-word reason> |
+| <type> | [<name>](<source_url>) | <job tag> | <≤10-word reason> |
+| <type> | [<name>](<source_url>) | <job tag> | <≤10-word reason> |
+
+(One row per recommendation in the same order as the detailed cards below. Every row carries a real `source_url` — skills.sh/ai-skills already have one; marketplace plugins use `homepage` from `marketplace.json`. If a row lacks one, drop the link from **every** row to keep the table uniform. Never invent a URL.)
+
+### 1. <job tag>
+**Evidence:** <hard counts, e.g. "60% of activity is wp-calypso: git -C wp-calypso ×35, gh api Automattic/wp-calypso/pulls ×10, eslint, yarn build, TeamCity CI">.
+**Recommended <type>:** **<name>** — <one-line description from `get` (richer than search)>
+**Install:**
+- `<exact command 1, in backticks>`
+- `<exact command 2, in backticks>`
+**Provenance:** Catalog verified · not generated.
+
+### 2. <job tag>
+... same shape ...
+
+### 3. <job tag>
+... same shape ...
+
+If no catalog-backed skill matched a job, say so explicitly: *"No catalog-backed skill matched this pattern. No recommendation was generated."* Do not pad with weak matches.
+
+---
+
 ## 🩺 Workflow signals
 
 How you're working, scored only where there's a clear better way. Each row = 🟢 Good / 🟡 Watch / 🔴 Needs action / ⚪ No data.
@@ -264,23 +294,6 @@ How you're working, scored only where there's a clear better way. Each row = �
 
 ---
 
-## ✨ Catalog-backed recommendations
-
-| Type | Name | Matches | Why |
-|---|---|---|---|
-| <type> | [<name>](<source_url>) | <job tag> | <≤10-word reason> |
-
-### 1. <job tag>
-**Evidence:** <hard counts>
-**Recommended <type>:** **<name>** — <one-line description from `get`>
-**Install:**
-- `<exact command 1>`
-- `<exact command 2>`
-
-(If no catalog-backed skill matched a job, say so explicitly: *"No catalog-backed skill matched this pattern."*)
-
----
-
 ## 🛠️ Worth building yourself
 
 You do these a lot, but no existing skill matches — so you'd make your own.
@@ -297,18 +310,6 @@ You do these a lot, but no existing skill matches — so you'd make your own.
 |---|---|---|---|
 | Sessions finished | 80% | ↑ from 79 | (sparkline in HTML) |
 | Risky git | 16 | ↑ from 13 | (sparkline in HTML) |
-
----
-
-## 🔒 Trust ledger
-
-- Local only — no network calls during scan, render, history, or redaction.
-- Redaction applied at every write boundary (Authorization/Bearer, sk-… / gh_… keys, AWS-style, basic-auth URLs, password=/token=, long hex).
-- History stores numbers only — no commands, paths, prompts, or session IDs.
-- Recommendations are catalog-backed; coaching points cite hard counts.
-- Stuck-loop entries on disk: hash + 3-word summary only — never the raw command.
-- Coverage shown on every rate (`X of N labeled`); low data → "No data", not weak inference.
-- No invented skills. If no catalog match, the report says so.
 ```
 
 **"Worth building yourself"** is the list below the numbered recommendations: things the user does often where no existing skill fits, so the move is to author one. Each is a one-line bullet (no Evidence/Install/Confidence blocks) ending with a `npx skills init <name>` scaffold command so it's actionable, not just named. Keep the heading plain — no confidence dots. Only append the `npx skills init` command when skills.sh is in `available_catalogs` (i.e. `npx` is present); otherwise leave the bullet as a plain description.
@@ -423,8 +424,7 @@ After the markdown report is written, generate a self-contained visual version a
    - `verdict`: `{name, summary, evidence_chips: [str, ...], next_phrase}` — the hero. `name` is one of the verdicts in the ladder; `summary` is one or two sentences; `evidence_chips` are 2–4 compact counts; `next_phrase` is the exact phrase the user should say (mirrors `primary_action.phrase`).
    - `archetype`: `{title, tagline, why, strength, watch_out, next_ritual}` from Step 5.5.
    - `primary_action`: `{title, phrase, why, source}` — the one action above the fold. `source` is e.g. `"prompt-to-command (sibling skill)"`, `"learnings-keeper (sibling skill)"`, a catalog-backed skill name, or `"Behavior recommendation — no install needed"`.
-   - `trust_ledger`: optional list of guarantee strings. The renderer has sane defaults if absent; supply your own only to override one line (e.g. add *"Stuck-loop detector was idle this run"*).
-   - `recommendations`: one object per rec — `{rank, confidence: "high"|"med"|"low", type, name, job, evidence, description, install: [cmds], source_url}`.
+   - `recommendations`: one object per rec — `{rank, confidence: "high"|"med"|"low", type, name, job, evidence, description, install: [cmds], source_url}`. **This is one of the two most important sections** (with Primary action). Always emit the **full numbered detail in markdown too**, never just the TL;DR table.
    - `gaps`: `[{tag, note, init}]` (the "Worth building yourself" list).
    - `coaching`: `[{title, evidence, costs, better}]` (keys unchanged; the renderer labels them What we saw / Why it matters / Try this).
    - `work_recap`: pass `work_recap` straight from the scan JSON (drives the "What you've been working on" strip).
