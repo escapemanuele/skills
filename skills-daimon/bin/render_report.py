@@ -46,15 +46,20 @@ sys.path.insert(0, str(Path(__file__).parent))
 from redact import redact_in  # noqa: E402
 
 
-# --- palette ----------------------------------------------------------------
-ACCENT = "#4f46e5"
-ACCENT_SOFT = "#eef2ff"
-INK = "#1e2330"
-MUTED = "#6b7280"
-BAR = "#6366f1"
-BAR_WARN = "#f59e0b"
-GAP = "#e5e7eb"
-CONF = {"high": "#16a34a", "med": "#f59e0b", "low": "#9ca3af"}
+# --- palette (charter v2) ---------------------------------------------------
+ACCENT = "#6D28D9"        # primary
+ACCENT_SOFT = "#EDE9FE"
+INK = "#171717"
+MUTED = "#6B7280"
+BG = "#F8F7F3"
+GAP = "#E5E7EB"
+GOOD = "#0F766E"
+WATCH = "#B45309"
+BAD = "#B42318"           # "needs_action"
+INFO = "#2563EB"
+BAR = "#6D28D9"
+BAR_WARN = WATCH
+CONF = {"high": GOOD, "med": WATCH, "low": MUTED}
 CONF_DOTS = {"high": "●●●", "med": "●●○", "low": "●○○"}
 
 
@@ -90,7 +95,28 @@ def bar_chart(data: dict, title: str, top: int = 10, color: str = BAR) -> str:
     )
 
 
-VERDICT_LABEL = {"good": "✓ good", "warn": "↑ improve", "bad": "↑ change"}
+# Charter labels: Good / Watch / Needs action / No data.
+# Legacy keys (`warn`, `bad`) alias to `watch` / `needs_action` so existing
+# payloads still render correctly.
+VERDICT_LABEL = {
+    "good": "✓ Good",
+    "watch": "↑ Watch",
+    "warn": "↑ Watch",
+    "needs_action": "↑ Needs action",
+    "bad": "↑ Needs action",
+    "no_data": "— No data",
+}
+
+
+def _verdict_class(v: str) -> str:
+    """Map a payload verdict to the CSS class root."""
+    if v in ("watch", "warn"):
+        return "watch"
+    if v in ("needs_action", "bad"):
+        return "bad"
+    if v == "no_data":
+        return "nodata"
+    return v or "watch"
 
 
 def _fmt_num(v):
@@ -169,7 +195,7 @@ def scorecard_strip(items: list, history_by_key: dict | None = None) -> str:
             f'<div class="scmain"><div class="sclabel">{esc(it.get("label", ""))}</div></div>'
             f'<div class="scval">{esc(it.get("value", ""))}{delta}</div>'
             f'<div class="scspark">{spark}</div>'
-            f'<span class="verdict {esc(v)}">{vlabel}</span>'
+            f'<span class="verdict {_verdict_class(v)}">{vlabel}</span>'
             '</summary>'
             f'<div class="scbody">{body}</div>'
             '</details>'
@@ -201,12 +227,18 @@ def rec_card(r: dict) -> str:
 
 
 def coach_card(c: dict) -> str:
+    handoff = (c.get("handoff") or "").strip()
+    handoff_html = (
+        f'<p><span class="tag hand-t">Handoff</span> {esc(handoff)}</p>'
+        if handoff else ""
+    )
     return (
         '<div class="card coach">'
         f'<h4>{esc(c.get("title", ""))}</h4>'
         f'<p><span class="tag ev-t">What we saw</span> {esc(c.get("evidence", ""))}</p>'
         f'<p><span class="tag cost-t">Why it matters</span> {esc(c.get("costs", ""))}</p>'
         f'<p><span class="tag best-t">Try this</span> {esc(c.get("better", ""))}</p>'
+        f'{handoff_html}'
         '</div>'
     )
 
@@ -276,11 +308,99 @@ def gap_item(g: dict) -> str:
     )
 
 
+def hero_verdict_card(verdict: dict, meta: dict) -> str:
+    """The hero: named verdict, summary, evidence chips, next move."""
+    if not verdict or not verdict.get("name"):
+        return ""
+    chips = "".join(
+        f'<span class="chip">{esc(c)}</span>' for c in (verdict.get("evidence_chips") or [])
+    )
+    next_phrase = (verdict.get("next_phrase") or "").strip()
+    next_html = (
+        f'<div class="hv-next"><span class="hv-next-label">Next move</span>'
+        f'<code class="hv-phrase">{esc(next_phrase)}</code></div>'
+        if next_phrase else ""
+    )
+    days = esc(meta.get("days", "14"))
+    date = esc(meta.get("date", ""))
+    return (
+        '<section class="hero-verdict">'
+        f'<div class="hv-sub">Skills Daimon · Last {days} days · generated {date}</div>'
+        f'<h1 class="hv-name">{esc(verdict.get("name"))}</h1>'
+        f'<p class="hv-summary">{esc(verdict.get("summary", ""))}</p>'
+        f'<div class="hv-chips">{chips}</div>'
+        f'{next_html}'
+        '</section>'
+    )
+
+
+def primary_action_card(a: dict) -> str:
+    """The single most-important card above the fold."""
+    if not a or not a.get("title"):
+        return ""
+    phrase = (a.get("phrase") or "").strip()
+    why = esc(a.get("why", ""))
+    source = esc(a.get("source", ""))
+    phrase_html = f'<code class="pa-phrase">{esc(phrase)}</code>' if phrase else ""
+    return (
+        '<section class="primary-action card">'
+        '<div class="pa-tag">Primary next action</div>'
+        f'<h2 class="pa-title">{esc(a.get("title"))}</h2>'
+        f'{phrase_html}'
+        f'<p class="pa-why"><b>Why.</b> {why}</p>'
+        f'<p class="pa-source"><b>Source.</b> {source}</p>'
+        '</section>'
+    )
+
+
+_DEFAULT_TRUST = [
+    "Local only — no network calls during scan, render, history, or redaction.",
+    "Redaction applied at every write boundary (Authorization/Bearer, sk-…, gh tokens, AWS keys, basic-auth URLs, password=/token=, long hex).",
+    "History stores numbers only — no commands, paths, prompts, or session IDs.",
+    "Recommendations are catalog-backed; coaching points cite hard counts.",
+    "Stuck-loop entries on disk: hash + 3-word summary only.",
+    "Coverage shown on every rate (X of N labeled); low data → No data, not weak inference.",
+    "No invented skills. If no catalog match, the report says so.",
+]
+
+
+def trust_ledger_card(items: list | None) -> str:
+    bullets = items if items else _DEFAULT_TRUST
+    rows = "".join(f"<li>{esc(b)}</li>" for b in bullets)
+    return (
+        '<section class="trust card">'
+        '<h2 class="trust-title">🔒 Trust ledger</h2>'
+        f'<ul class="trust-list">{rows}</ul>'
+        '</section>'
+    )
+
+
+def archetype_card(a: dict) -> str:
+    """Five-part archetype card per charter."""
+    if not a or not a.get("title"):
+        return ""
+    parts = []
+    parts.append(f'<div class="archlabel">Your archetype</div>')
+    parts.append(f'<div class="archtitle">{esc(a.get("title"))}</div>')
+    if a.get("tagline"):
+        parts.append(f'<div class="archtag">{esc(a.get("tagline"))}</div>')
+    rows = []
+    for label, key in (("Why this title", "why"), ("Strength", "strength"),
+                       ("Watch-out", "watch_out"), ("Next ritual", "next_ritual")):
+        v = (a.get(key) or "").strip()
+        if v:
+            rows.append(
+                f'<dt class="arch-dt">{label}</dt><dd class="arch-dd">{esc(v)}</dd>'
+            )
+    if rows:
+        parts.append(f'<dl class="arch-dl">{"".join(rows)}</dl>')
+    return '<section class="archetype-card card">' + "".join(parts) + '</section>'
+
+
 CSS = """
 *{box-sizing:border-box}
 body{margin:0;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  color:%(INK)s;-webkit-font-smoothing:antialiased;
-  background:linear-gradient(180deg,#f4f0ff 0%%,#f7f8fb 240px)}
+  color:%(INK)s;-webkit-font-smoothing:antialiased;background:%(BG)s}
 .wrap{max-width:920px;margin:0 auto;padding:32px 24px 64px}
 header.hero{background:linear-gradient(135deg,%(ACCENT)s,#7c3aed);color:#fff;
   border-radius:18px;padding:28px 30px;margin-bottom:28px}
@@ -323,8 +443,9 @@ code{font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0f172
 .coach p{margin:5px 0}
 .tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;
   letter-spacing:.5px;padding:1px 7px;border-radius:5px;margin-right:6px}
-.ev-t{background:#eef2ff;color:#4f46e5}.cost-t{background:#fef2f2;color:#dc2626}
-.best-t{background:#f0fdf4;color:#16a34a}
+.ev-t{background:%(ACCENT_SOFT)s;color:%(ACCENT)s}.cost-t{background:#FEF2F2;color:%(BAD)s}
+.best-t{background:#ECFDF5;color:%(GOOD)s}
+.hand-t{background:#EFF6FF;color:%(INFO)s}
 ul.gaps{list-style:none;padding:0;margin:0}
 ul.gaps li{background:#fff;border:1px solid %(GAP)s;border-left:3px solid %(MUTED)s;
   border-radius:10px;padding:12px 16px;margin-bottom:10px}
@@ -347,16 +468,59 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .scval{font-variant-numeric:tabular-nums;font-weight:700;font-size:15px;white-space:nowrap;color:%(MUTED)s}
 .scspark{color:%(ACCENT)s;opacity:.85;flex-shrink:0;min-width:72px;text-align:right}
 .delta{font-size:12px;font-weight:600;margin-left:6px}
-.delta.up{color:#dc2626}
-.delta.down{color:#16a34a}
+.delta.up{color:%(BAD)s}
+.delta.down{color:%(GOOD)s}
 .scrow .verdict{margin:0;flex-shrink:0}
 .scbody{padding:0 0 16px 24px;color:#374151;font-size:13.5px;line-height:1.55}
 .scexplain{margin-top:8px;padding:10px 12px;background:#f7f8fb;border-radius:8px;color:%(INK)s}
 .verdict{text-align:center;font-size:12.5px;font-weight:600;margin:12px auto 0;
   padding:5px 12px;border-radius:999px;display:block;width:fit-content}
-.verdict.good{background:#ecfdf5;color:#059669}
-.verdict.warn{background:#fffbeb;color:#d97706}
-.verdict.bad{background:#fef2f2;color:#dc2626}
+.verdict.good{background:#ECFDF5;color:%(GOOD)s}
+.verdict.watch{background:#FFFBEB;color:%(WATCH)s}
+.verdict.bad{background:#FEF2F2;color:%(BAD)s}
+.verdict.nodata{background:#F3F4F6;color:%(MUTED)s}
+/* hero verdict */
+.hero-verdict{background:linear-gradient(135deg,%(ACCENT)s,#7c3aed);color:#fff;
+  border-radius:20px;padding:30px 32px;margin-bottom:20px;box-shadow:0 8px 28px rgba(109,40,217,.18)}
+.hv-sub{font-size:12px;text-transform:uppercase;letter-spacing:.8px;opacity:.85;margin-bottom:10px}
+.hv-name{margin:0 0 10px;font-size:34px;font-weight:800;letter-spacing:-.5px;line-height:1.1}
+.hv-summary{margin:0 0 14px;font-size:16px;line-height:1.45;opacity:.95;max-width:60ch}
+.hv-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.chip{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);
+  padding:4px 10px;border-radius:999px;font-size:12px;font-variant-numeric:tabular-nums}
+.hv-next{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:12px 14px;background:rgba(255,255,255,.13);border-radius:12px}
+.hv-next-label{font-size:11px;text-transform:uppercase;letter-spacing:.8px;opacity:.85}
+.hv-phrase{display:inline-block;background:#0f172a;color:#fff;padding:7px 11px;
+  border-radius:8px;font:13.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+/* primary action */
+.primary-action{border-left:5px solid %(ACCENT)s}
+.pa-tag{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:%(ACCENT)s;
+  font-weight:700;margin-bottom:6px}
+.pa-title{margin:0 0 10px;font-size:22px;font-weight:700;color:%(INK)s}
+.pa-phrase{display:inline-block;margin:0 0 12px}
+.pa-why,.pa-source{margin:6px 0;color:#374151}
+.pa-source{color:%(MUTED)s;font-size:13px}
+/* archetype card */
+.archetype-card .archlabel{font-size:11px;text-transform:uppercase;letter-spacing:.8px;
+  color:%(MUTED)s;margin-bottom:4px}
+.archetype-card .archtitle{font-size:22px;font-weight:700;color:%(INK)s;line-height:1.15}
+.archetype-card .archtag{font-size:14px;color:#374151;margin-top:4px;font-style:italic}
+.arch-dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:14px 0 0;
+  font-size:14px;line-height:1.5}
+.arch-dt{font-weight:700;color:%(ACCENT)s}
+.arch-dd{margin:0;color:#374151}
+/* trust ledger */
+.trust .trust-title{font-size:15px;margin:0 0 8px;color:%(INK)s}
+.trust-list{margin:0;padding:0 0 0 18px;color:#374151;font-size:13.5px;line-height:1.55}
+.trust-list li{margin:4px 0}
+/* catalog source strip (outside the hero now) */
+.srcstrip{padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.srclabel-dark{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
+  color:%(MUTED)s}
+.srclabel-dark span{font-weight:400;text-transform:none;letter-spacing:0}
+.badge-dark{background:%(ACCENT_SOFT)s;border:1px solid %(GAP)s;color:%(ACCENT)s;
+  padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600}
 .seclead{color:%(MUTED)s;font-size:14px;margin:-6px 0 12px}
 h2.sec.big{font-size:20px;text-transform:none;letter-spacing:0;color:%(INK)s;border:0;
   margin:8px 0 16px}
@@ -380,7 +544,8 @@ table.rt td.num,table.rt th.num{text-align:right;font-variant-numeric:tabular-nu
 footer{margin-top:40px;color:%(MUTED)s;font-size:12px;text-align:center}
 """ % {
     "INK": INK, "ACCENT": ACCENT, "ACCENT_SOFT": ACCENT_SOFT,
-    "MUTED": MUTED, "GAP": GAP,
+    "MUTED": MUTED, "GAP": GAP, "BG": BG,
+    "GOOD": GOOD, "WATCH": WATCH, "BAD": BAD, "INFO": INFO,
 }
 
 
@@ -392,45 +557,51 @@ def render(payload: dict) -> str:
     charts = payload.get("charts", {})
     work_recap = payload.get("work_recap", {})
 
-    badges = "".join(
-        f'<span class="badge">{esc(c)}</span>' for c in m.get("catalogs", [])
-    )
-
-    # Archetype: a playful title + tagline (text only).
-    arch = payload.get("archetype") or {}
-    arch_html = ""
-    if arch.get("title"):
-        arch_html = (
-            '<div class="archetype">'
-            f'<div class="archtext"><div class="archlabel">Your archetype</div>'
-            f'<div class="archtitle">{esc(arch.get("title"))}</div>'
-            f'<div class="archtag">{esc(arch.get("tagline", ""))}</div></div>'
-            '</div>'
+    # ─── HERO VERDICT (replaces the old hero/title) ────────────────────────
+    hero_html = hero_verdict_card(payload.get("verdict") or {}, m)
+    # If no verdict was provided (payload missing it) fall back to a tiny
+    # title bar so the report still has a top.
+    if not hero_html:
+        date = esc(m.get("date", ""))
+        days = esc(m.get("days", 14))
+        hero_html = (
+            '<section class="hero-verdict">'
+            '<div class="hv-sub">Skills Daimon · Last '
+            f'{days} days · generated {date}</div>'
+            '<h1 class="hv-name">Snapshot</h1>'
+            '<p class="hv-summary">No verdict supplied; showing the underlying signals below.</p>'
+            '</section>'
         )
 
-    hero = (
-        '<header class="hero"><h1>Your usage report</h1>'
-        f'<div class="sub">Last {esc(m.get("days", 14))} days · '
-        f'generated {esc(m.get("date", ""))}</div>'
-        f'{arch_html}'
-        '<div class="stats">'
-        f'<div class="s"><b>{esc(m.get("sessions", "?"))}</b><span>sessions</span></div>'
-        f'<div class="s"><b>{esc(m.get("projects", "?"))}</b><span>projects</span></div>'
-        f'<div class="s"><b>{len(recs)}</b><span>recommendations</span></div>'
-        f'<div class="s"><b>{len(coaching)}</b><span>coaching tips</span></div>'
-        '</div>'
-        '<div class="srclabel">Skill sources searched <span>— marketplaces &amp; registries recommendations can come from</span></div>'
-        f'<div class="badges">{badges}</div></header>'
+    # ─── ARCHETYPE CARD (5-part) ───────────────────────────────────────────
+    arch_html = archetype_card(payload.get("archetype") or {})
+
+    # ─── PRIMARY ACTION CARD ───────────────────────────────────────────────
+    pa_html = primary_action_card(payload.get("primary_action") or {})
+
+    # ─── CATALOG BADGES (small, under the hero) ────────────────────────────
+    badges = "".join(
+        f'<span class="badge badge-dark">{esc(c)}</span>' for c in m.get("catalogs", [])
+    )
+    catalog_strip = (
+        '<section class="srcstrip card">'
+        '<div class="srclabel-dark">Skill sources searched <span>— marketplaces &amp; registries</span></div>'
+        f'<div class="badges">{badges}</div>'
+        '</section>'
+    ) if badges else ""
+
+    # ─── RECAP ─────────────────────────────────────────────────────────────
+    recap_html = (
+        '<h2 class="sec">🧭 What you\'ve been working on</h2>' + recap_strip(work_recap)
+        if work_recap.get("top_projects") else ""
     )
 
-    # Health-check scorecard (payload-driven; each item carries its own verdict)
+    # ─── WORKFLOW SIGNALS (was Health check) ───────────────────────────────
     scorecard = payload.get("scorecard", [])
-    # Read history for sparklines + deltas (silent if file is missing/short).
     history_by_key: dict[str, list] = {}
     try:
         import history as _history  # type: ignore
         entries = _history.read_last(8, window_days=int(m.get("days") or 0) or None)
-        # Build per-key series in chronological order from entries' scorecard.
         for e in entries:
             sc = e.get("scorecard") or {}
             for k, v in sc.items():
@@ -440,30 +611,13 @@ def render(payload: dict) -> str:
         history_by_key = {}
 
     scorecard_html = (
-        '<h2 class="sec">🩺 Health check</h2>'
-        '<p class="seclead">How you\'re working, scored where there\'s a clear better way.</p>'
+        '<h2 class="sec">🩺 Workflow signals</h2>'
+        '<p class="seclead">How you\'re working, scored where there\'s a clear better way. Good · Watch · Needs action · No data.</p>'
         + scorecard_strip(scorecard, history_by_key)
         if scorecard else ""
     )
 
-    # Activity bars — pure context, no verdict. Moved to the bottom.
-    chart_blocks = []
-    if charts.get("tool_use_top"):
-        chart_blocks.append(bar_chart(charts["tool_use_top"], "Tool use", top=8, color=BAR))
-    if charts.get("bash_verbs_top"):
-        chart_blocks.append(bar_chart(charts["bash_verbs_top"], "Top bash verbs", top=10, color="#0ea5e9"))
-    charts_html = (
-        '<h2 class="sec">📊 Your activity — just for context</h2>'
-        '<p class="seclead">Raw counts, no score. Just what you ran most.</p>'
-        f'<div class="charts">{"".join(chart_blocks)}</div>'
-        if chart_blocks else ""
-    )
-
-    recap_html = (
-        '<h2 class="sec">🧭 What you\'ve been working on</h2>' + recap_strip(work_recap)
-        if work_recap.get("top_projects") else ""
-    )
-
+    # ─── RECS + GAPS + COACHING (unchanged ordering) ───────────────────────
     recs_html = (
         '<h2 class="sec">✨ Recommendations</h2>' + "".join(rec_card(r) for r in recs)
         if recs else ""
@@ -483,13 +637,39 @@ def render(payload: dict) -> str:
         if coaching else ""
     )
 
+    # ─── ACTIVITY BARS (context only, at the bottom) ───────────────────────
+    chart_blocks = []
+    if charts.get("tool_use_top"):
+        chart_blocks.append(bar_chart(charts["tool_use_top"], "Tool use", top=8, color=BAR))
+    if charts.get("bash_verbs_top"):
+        chart_blocks.append(bar_chart(charts["bash_verbs_top"], "Top bash verbs", top=10, color=INFO))
+    charts_html = (
+        '<h2 class="sec">📊 Your activity — just for context</h2>'
+        '<p class="seclead">Raw counts, no score. Just what you ran most.</p>'
+        f'<div class="charts">{"".join(chart_blocks)}</div>'
+        if chart_blocks else ""
+    )
+
+    # ─── TRUST LEDGER ──────────────────────────────────────────────────────
+    trust_html = trust_ledger_card(payload.get("trust_ledger"))
+
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>skills-daimon report</title><style>" + CSS + "</style></head><body>"
-        '<div class="wrap">' + hero + recap_html + recs_html + gaps_html
-        + scorecard_html + coach_html + charts_html
-        + '<footer>🏛 Generated by <b>skills-daimon</b> — your guide, from your own '
+        "<title>Skills Daimon</title><style>" + CSS + "</style></head><body>"
+        '<div class="wrap">'
+        + hero_html
+        + arch_html
+        + pa_html
+        + catalog_strip
+        + recap_html
+        + scorecard_html
+        + recs_html
+        + gaps_html
+        + coach_html
+        + charts_html
+        + trust_html
+        + '<footer>🏛 Generated by <b>Skills Daimon</b> · evidence from your own '
           'Claude Code sessions · nothing left this machine 🔒</footer>'
         "</div></body></html>"
     )
