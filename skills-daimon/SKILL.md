@@ -239,7 +239,7 @@ Say:
 
 ## ✨ Catalog-backed recommendations
 
-Skills the user can install, drawn only from real catalog hits. **Catalog-verified, never generated.** **Always render the full detail in markdown too — not just in HTML — including the TL;DR table and the numbered cards below.**
+Skills the user can install, drawn only from real catalog hits. **Catalog-verified, never generated.** **Aim for 3 recommendations minimum (cap 5).** **Always render the full detail in markdown too — not just in HTML — including the TL;DR table and the numbered cards below.**
 
 | Type | Name | Matches | Why |
 |---|---|---|---|
@@ -380,7 +380,8 @@ Build coaching points from these signals (skip any that don't clear the threshol
 
 - Lead with evidence. Every recommendation AND every coaching point must cite a count.
 - Mark confidence honestly — *"low"* is fine and trustworthy.
-- No more than 5 recommended skills total. No more than 3 "worth building yourself" entries. No more than 3 coaching points.
+- **Aim for 3 recommendations (minimum); cap at 5.** Recommendations are one of the report's two main focuses, alongside the Primary action — never ship fewer than 3 when the catalogs can support it. If you initially identify only 1–2 strong jobs, widen the job search to the next-best signals (secondary bash verbs, MCP calls, recap focus areas) and run another catalog query, so long as every rec stays catalog-backed and grounded in a real count. If after that **fewer than 3 real catalog hits genuinely exist**, say so plainly: *"Only N catalog-backed recommendations matched your usage; the rest is in 'Worth building yourself.'"* Never pad with weak matches and never invent skills.
+- No more than 3 "worth building yourself" entries. No more than 3 coaching points.
 - **Evidence-bound coaching is in scope** — calling out a habit ("214 raw `grep`/`find`/`cat` calls — the native Grep/Glob/Read tools are faster") is exactly the teacher role, *as long as it cites a count*. What's still out of bounds is **count-free editorializing** ("you should review PRs less often") — opinions with no number behind them.
 
 ## Step 5.5 — Award an archetype (a playful title)
