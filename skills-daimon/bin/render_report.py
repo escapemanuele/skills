@@ -41,6 +41,10 @@ import json
 import sys
 from pathlib import Path
 
+# Shared secret redactor (applied at the write boundary).
+sys.path.insert(0, str(Path(__file__).parent))
+from redact import redact_in  # noqa: E402
+
 
 # --- palette ----------------------------------------------------------------
 ACCENT = "#4f46e5"
@@ -174,14 +178,25 @@ def recap_strip(w: dict) -> str:
         return ""
     import os
     rows = []
+    any_shipped = any(
+        (p.get("commits") or 0) or (p.get("pushes") or 0)
+        for p in (w.get("top_projects") or [])
+    )
     for p in (w.get("top_projects") or [])[:5]:
         path = p.get("path", "")
         name = os.path.basename(path.rstrip("/")) or path
         kind = p.get("kind", "other")
         icon = KIND_ICON.get(kind, "•")
+        commits = int(p.get("commits") or 0)
+        pushes = int(p.get("pushes") or 0)
+        shipped_cell = (
+            f'<td class="num" title="commits / pushes (from session-meta)">'
+            f'{commits}c / {pushes}p</td>'
+        ) if any_shipped else ""
         rows.append(
             f'<tr><td>{icon} {esc(name)}</td><td class="num">{esc(p.get("sessions", 0))}</td>'
             f'<td class="num">{esc(fmt_tokens(p.get("tokens", 0)))}</td>'
+            f'{shipped_cell}'
             f'<td><span class="kind k-{esc(kind)}">{esc(kind)}</span></td></tr>'
         )
     mix = w.get("mix") or {}
@@ -190,11 +205,12 @@ def recap_strip(w: dict) -> str:
         for k, v in mix.items() if v
     )
     mix_legend = " · ".join(f'{esc(k)} {v}%' for k, v in mix.items() if v)
+    shipped_th = '<th class="num">Shipped</th>' if any_shipped else ""
     return (
         '<div class="card recap">'
         f'<div class="mixbar">{mix_bar}</div><p class="cap">{esc(mix_legend)}</p>'
         '<table class="rt"><thead><tr><th>Project</th><th class="num">Sessions</th>'
-        '<th class="num">Tokens</th><th>Focus</th></tr></thead><tbody>'
+        f'<th class="num">Tokens</th>{shipped_th}<th>Focus</th></tr></thead><tbody>'
         f'{"".join(rows)}</tbody></table>'
         '</div>'
     )
@@ -414,6 +430,9 @@ def main() -> int:
         payload = json.loads(Path(sys.argv[1]).read_text())
     else:
         payload = json.loads(sys.stdin.read())
+
+    # Belt-and-braces: scrub plausible secrets in every string before render.
+    payload = redact_in(payload)
 
     date = payload.get("meta", {}).get("date") or _dt.date.today().isoformat()
     out_dir = Path.home() / ".claude" / "skills" / "skills-daimon" / "reports"

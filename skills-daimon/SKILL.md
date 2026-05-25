@@ -44,7 +44,11 @@ The JSON includes:
   - `raw_http_hosts` — `{host: count}` for hosts hit by raw `curl`/`wget`. A host with a dedicated CLI/MCP (e.g. `teamcity.a8c.com`) is a coaching opportunity.
   - `sleep_calls` — count of foreground `sleep` calls (often polling that a proper wait/background job would replace).
   - `hot_repos_without_claudemd` — `[{path, sessions}]` for git repos with ≥3 sessions and no `CLAUDE.md` (context re-explained each session).
-- **Work-recap field:** `work_recap` — `{top_projects:[{path, sessions, tokens, kind, branch}], mix:{dev,writing,data,ops}}`. `kind` is the dominant signal per project (dev / writing / data / ops); `mix` is the rough percentage split across the window. Use this to describe **what** the user works on and to **weight which recommendations surface first** (see Step 2).
+- **Work-recap field:** `work_recap` — `{top_projects:[{path, sessions, tokens, kind, branch, commits, pushes}], mix:{dev,writing,data,ops}}`. `kind` is the dominant signal per project (dev / writing / data / ops); `mix` is the rough percentage split across the window. `commits`/`pushes` come from session-meta and are 0 when no meta file exists. Use this to describe **what** the user works on and to **weight which recommendations surface first** (see Step 2).
+- **Outcomes field:** `outcomes` — Anthropic's own labels for finished sessions. `{by_facet, friction_sessions, friction_counts_sum, primary_success_top, session_type_mix, helpfulness_mix, coverage}`. **Coverage is required.** Every rate derived from `outcomes` must be over `coverage.labeled`, never `coverage.total`. Use raw enum values (`mostly_achieved`, `wrong_approach`, `single_task`, `very_helpful`, …) in any code; pretty labels only in display. Facet/meta files appear minutes after a session ends — sessions without one are silently skipped, which is fine.
+- **Completion field:** `completion` — from session-meta. `{sessions_with_commit, sessions_with_push, lines_added, lines_removed, files_modified, prs_detected_via_gh, coverage}`. Per-project commits/pushes live in `work_recap.top_projects[].commits|pushes`. Call this **commits/pushes**, never "PRs" — `prs_detected_via_gh` is opportunistic (counts `gh pr create` calls + PR URLs spotted in tool outputs) and must always be labeled as such.
+- **Tool errors field:** `tool_errors` — `{<tool_name>: {ok, error}}` from `tool_result.is_error` mapped via `tool_use_id`. Use to surface the Bash error rate and similar.
+- **Memory-events field:** `memory_events` — `{remember_invocations, memory_file_edits, sessions_with_memory}`. Tracks how often the user actually saves what they learn.
 
 If `session_count` is 0, stop and tell the user there's no recent session data to analyze.
 
@@ -254,6 +258,12 @@ Build coaching points from these signals (skip any that don't clear the threshol
   This is usually the clearest single win for the user, so prefer it as one of the 3 coaching points when the signal is present.
 - **Hot repo without CLAUDE.md** — for each entry in `hot_repos_without_claudemd`, suggest adding a `CLAUDE.md` so per-repo context stops being re-explained every session.
 - **Plan mode / subagents / memory** — only mention these if a signal supports it (e.g. very large multi-file edit sessions → plan mode; many independent parallel tasks → subagents). Don't list them generically.
+- **Top recurring friction** (from `outcomes.friction_sessions`). When any friction type appears in **≥30%** of `outcomes.coverage.labeled` sessions, surface it with the suggested fix and a concrete count. Examples:
+  - `wrong_approach` → *"Plan before coding. Try 'let's plan this first' on big changes."*
+  - `buggy_code` → *"Smaller diffs; ask Claude to add a quick test alongside the change."*
+  - `misunderstood_request` → *"Open with one sentence of context, then the ask."*
+  - `user_rejected_action` → *"Have Claude show the plan before making changes."*
+  Citation must include **both** denominator and intensity when they differ — e.g. *"wrong_approach in 19 of 57 labeled sessions (33%); 23 total events."*
 
 **Delivery rules:**
 - **Cap at 3 coaching points.** Pick the highest-signal ones. A short, sharp coaching section beats an exhaustive nag.
@@ -303,7 +313,10 @@ After the markdown report is written, generate a self-contained visual version a
    - **Risky git** — count `git push --force` / `git reset --hard` / `--no-verify` from `destructive_cmds` (ignore `rm -rf`). `0` → good (omit or show good), `1–3` → warn, `4+` → bad.
    - **Raw HTTP to a tool-backed host** — only for hosts in `raw_http_hosts` that actually have a CLI/MCP (you judge this, e.g. `teamcity.a8c.com`). Any such host → warn. `value` = "<host> ×N".
    - **Recurring prompt not saved** — recurring prompts (count ≥ 3) with no matching `installed_skills`. Any → warn. `value` = "N prompts". In `explain`, name the fix: *"Say 'turn my <task> prompt into a /command' to save it with the `prompt-to-command` skill"* (prefix with `npx skills add escapemanuele/skills` if it isn't installed).
-   Cap the scorecard at ~4 rows. If a signal is clean, you may show it as a `good` row (reassuring) or omit it — prefer showing at least one `good` row when something genuinely is fine.
+   - **Outcome — sessions finished** — from `outcomes.by_facet` and `outcomes.coverage`. Compute `(fully_achieved + mostly_achieved) / labeled`. Verdict: `≥85%` → good, `70–85%` → warn, `<70%` → bad. `value` = "<pct>% finished". `note` MUST include coverage: *"<labeled> of <total> sessions labeled"*. Skip the row when `labeled` is 0.
+   - **Tool error rate (Bash)** — from `tool_errors.Bash`. Rate = `error / (ok + error)`. Verdict: `<5%` → good, `5–15%` → warn, `≥15%` → bad. `value` = "<pct>% Bash errors", `note` = "<error> of <ok+error> calls".
+   - **Memory usage rate** — `memory_events.sessions_with_memory / session_count`. Verdict: `≥30%` → good, `10–30%` → warn, `<10%` → bad. In `explain`, name the fix: *"After a useful session, just say 'save what we learned' to use the `learnings-keeper` skill"* (once that skill exists; today phrase it as *"use `/remember` more often"*).
+   Cap the scorecard at ~5 rows. If a signal is clean, you may show it as a `good` row (reassuring) or omit it — prefer showing at least one `good` row when something genuinely is fine.
 2. **Write the payload** to a temp file and run the renderer:
    ```bash
    python3 ~/.claude/skills/skills-daimon/bin/render_report.py /tmp/skills-daimon-payload.json
