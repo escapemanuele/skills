@@ -969,8 +969,8 @@ def render(payload: dict) -> str:
         + arch_html
         + pa_html
         + quest_html        # one active quest, right after the primary action (charter §)
-        + catalog_strip
         + recs_html         # catalog-backed recommendations
+        + catalog_strip     # provenance: where those recs were searched from
         + recap_html
         + scorecard_html
         + gaps_html
