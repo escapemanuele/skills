@@ -661,7 +661,7 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .quest-do-label{font-size:11px;font-weight:900;color:%(GOOD)s;text-transform:uppercase;letter-spacing:.5px}
 .quest-do code{display:inline-block;margin-left:6px}
 .quest-reward{margin:10px 0 0;color:#374151;font-size:13.5px;font-weight:700}
-.quest-note{color:%(MUTED)s;font-size:12px}
+.quest-note{display:block;margin-top:4px;color:%(MUTED)s;font-size:12px;font-weight:500}
 .quest-track{display:inline-block;margin:4px 0 8px;font-size:12px;color:%(MUTED)s}
 .quest-empty{background:#fff;border-color:%(GAP)s;border-left-color:%(MUTED)s}
 .quest-empty .quest-tag{background:%(MUTED)s}
@@ -678,6 +678,10 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .grove-stat span{display:block;margin-top:4px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#7B6A58}
 .grove-progress{margin-top:12px;background:#ead6b5;border-radius:999px;height:12px;overflow:hidden;border:1px solid #d7bc92}
 .grove-progress span{display:block;height:100%%;min-width:8px;background:#0F766E;border-radius:999px}
+.grove-guide{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.grove-guide-pill{background:#fffaf0;border:1px solid #ead6b5;border-radius:8px;padding:7px 9px;
+  color:#4B5563;font-size:12px;line-height:1.2}
+.grove-guide-pill b{color:#2F271F}
 .grove-body{padding:16px 18px 18px}
 .grove-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:start;margin-bottom:14px}
 .grove-summary-main{font-size:16px;color:#374151}

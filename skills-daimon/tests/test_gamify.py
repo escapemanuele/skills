@@ -463,7 +463,8 @@ class TestDisplayPolish(unittest.TestCase):
         self.assertIn("RPG progress, evidence locked", html)
         self.assertIn("Daimon Grove Adventure Map", html)
         self.assertIn("Evidence ledger", html)
-        self.assertIn("Quest Log", html)
+        # Single strong label per quest card (was previously "Quest Log").
+        self.assertRegex(html, r'class="quest-tag">(Active quest|Quest)<')
         self.assertIn("XP verified this run", html)
         self.assertIn("Tool Fluency", html)
         self.assertIn("Project Hygiene", html)
