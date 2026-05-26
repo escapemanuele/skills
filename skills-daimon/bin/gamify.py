@@ -939,110 +939,139 @@ def numeric_game_history_snapshot(game_state: dict) -> dict:
 
 
 # ─── deterministic inline SVG (privacy-safe, no external assets) ────────────
-def render_grove_svg(grove: dict, *, width: int = 720, height: int = 110) -> str:
-    """Return a self-contained inline SVG of the Daimon Grove.
+def render_grove_svg(grove: dict, *, width: int = 900, height: int = 320) -> str:
+    """Return a self-contained inline SVG realm map of the Daimon Grove.
 
-    Six glyphs in a row, each scaling with its track level. No external
-    images, no JS. Includes <title>/<desc> for accessibility.
+    Six sites are connected by a deterministic trail. No external images, no
+    JS. Includes <title>/<desc> for accessibility.
     """
     g = grove or {}
     items = [
-        ("Command Tree",   _safe_int(g.get("command_tree_level")),  "tree"),
-        ("Memory Well",    _safe_int(g.get("memory_well_level")),   "well"),
-        ("Git Thorns",     _safe_int(g.get("git_thorn_level")),     "thorns"),
-        ("Planning Path",  _safe_int(g.get("planning_path_level")), "path"),
-        ("Tool Shrine",    _safe_int(g.get("tool_shrine_level")),   "shrine"),
-        ("Repo Signpost",  _safe_int(g.get("repo_signpost_level")), "post"),
+        ("Command Tree",   _safe_int(g.get("command_tree_level")),  "tree",   120, 220),
+        ("Memory Well",    _safe_int(g.get("memory_well_level")),   "well",   260, 126),
+        ("Git Thorns",     _safe_int(g.get("git_thorn_level")),     "thorns", 420, 216),
+        ("Planning Path",  _safe_int(g.get("planning_path_level")), "path",   560, 116),
+        ("Tool Shrine",    _safe_int(g.get("tool_shrine_level")),   "shrine", 708, 208),
+        ("Repo Signpost",  _safe_int(g.get("repo_signpost_level")), "post",   810, 116),
     ]
     constellation = bool(g.get("constellation_unlocked"))
-    n = len(items)
-    col_w = width / n
-    base_y = height - 22
+    site_fill = "#FFF7ED"
+    site_stroke = "#B08968"
+    ink = "#3F3A34"
+    muted = "#6B7280"
+    purple = "#6D28D9"
+    green = "#0F766E"
+    amber = "#B45309"
+    red = "#B42318"
+    blue = "#2563EB"
 
-    def _label(x, name, level):
+    def _label(x, y, name, level):
         return (
-            f'<text x="{x}" y="{height-4}" text-anchor="middle" '
-            f'font-size="10" fill="#6B7280" font-family="-apple-system,sans-serif">'
-            f'{name} · L{level}</text>'
+            f'<text x="{x}" y="{y+58}" text-anchor="middle" '
+            f'font-size="13" font-weight="700" fill="{ink}" font-family="-apple-system,sans-serif">'
+            f'{name}</text>'
+            f'<text x="{x}" y="{y+75}" text-anchor="middle" '
+            f'font-size="11" fill="{muted}" font-family="-apple-system,sans-serif">'
+            f'Level {level}</text>'
+        )
+
+    def _site(cx, cy, lvl, body):
+        ring = 28 + min(max(lvl - 1, 0), 5) * 2
+        return (
+            f'<circle cx="{cx}" cy="{cy}" r="{ring + 8}" fill="#FDECC8" opacity="0.85"/>'
+            f'<circle cx="{cx}" cy="{cy}" r="{ring}" fill="{site_fill}" stroke="{site_stroke}" stroke-width="3"/>'
+            f'<circle cx="{cx}" cy="{cy}" r="{ring - 7}" fill="none" stroke="#FCD34D" stroke-width="2" stroke-dasharray="3 7"/>'
+            f'{body}'
         )
 
     glyphs = []
-    for i, (name, lvl, kind) in enumerate(items):
-        cx = col_w * i + col_w / 2
-        # Active visibility scales with level (clamped 0–6).
-        a = max(0, min(6, lvl))
-        active = a > 0
-        color = "#6D28D9" if active else "#D1D5DB"
+    for name, lvl, kind, cx, cy in items:
+        a = max(1, min(6, lvl))
         if kind == "tree":
-            # trunk + canopy
-            h = 10 + a * 5
-            glyphs.append(
-                f'<rect x="{cx-2}" y="{base_y-h}" width="4" height="{h}" fill="{color}"/>'
-                f'<circle cx="{cx}" cy="{base_y-h}" r="{8 + a*1.5}" fill="{color}" opacity="{0.35+a*0.08}"/>'
+            body = (
+                f'<rect x="{cx-4}" y="{cy-2}" width="8" height="30" rx="2" fill="#7C4A28"/>'
+                f'<circle cx="{cx}" cy="{cy-18}" r="{16+a}" fill="{green}" opacity="0.95"/>'
+                f'<circle cx="{cx-14}" cy="{cy-8}" r="{11+a}" fill="#10B981" opacity="0.88"/>'
+                f'<circle cx="{cx+14}" cy="{cy-8}" r="{11+a}" fill="#047857" opacity="0.88"/>'
             )
         elif kind == "well":
-            # round well; fill rises with level
-            r = 14
-            fill_h = (a / 6) * (2 * r)
-            glyphs.append(
-                f'<circle cx="{cx}" cy="{base_y-r}" r="{r}" fill="none" stroke="{color}" stroke-width="2"/>'
-                f'<rect x="{cx-r+1}" y="{base_y-1-fill_h}" width="{2*r-2}" height="{fill_h}" fill="{color}" opacity="0.55"/>'
+            fill_h = 8 + a * 2
+            body = (
+                f'<ellipse cx="{cx}" cy="{cy+4}" rx="22" ry="11" fill="#A7F3D0" stroke="{blue}" stroke-width="3"/>'
+                f'<rect x="{cx-22}" y="{cy-10}" width="44" height="22" fill="#FDE68A" stroke="{site_stroke}" stroke-width="2"/>'
+                f'<rect x="{cx-18}" y="{cy+11-fill_h}" width="36" height="{fill_h}" fill="#60A5FA" opacity="0.72"/>'
+                f'<path d="M {cx-24} {cy-10} Q {cx} {cy-34} {cx+24} {cy-10}" fill="none" stroke="{site_stroke}" stroke-width="3"/>'
             )
         elif kind == "thorns":
-            # thorns recede as level rises (safety good = fewer)
-            thorns = max(1, 6 - a)
+            thorns = max(1, 7 - a)
+            bits = []
             for k in range(thorns):
-                px = cx - 14 + k * 6
-                glyphs.append(
-                    f'<path d="M {px} {base_y} L {px+3} {base_y-12} L {px+6} {base_y} Z" '
-                    f'fill="{"#B42318" if a < 3 else color}" opacity="0.85"/>'
+                px = cx - 24 + k * 8
+                bits.append(
+                    f'<path d="M {px} {cy+18} L {px+4} {cy-12} L {px+8} {cy+18} Z" fill="{red}" opacity="0.9"/>'
                 )
+            body = "".join(bits) + (
+                f'<path d="M {cx-32} {cy+20} C {cx-10} {cy+6}, {cx+10} {cy+6}, {cx+32} {cy+20}" '
+                f'fill="none" stroke="#7F1D1D" stroke-width="3"/>'
+            )
         elif kind == "path":
-            # dashed stone path; length scales with level
-            length = 18 + a * 4
-            glyphs.append(
-                f'<line x1="{cx-length/2}" y1="{base_y}" x2="{cx+length/2}" y2="{base_y}" '
-                f'stroke="{color}" stroke-width="3" stroke-dasharray="6 4"/>'
+            stones = []
+            for k in range(5):
+                stones.append(
+                    f'<ellipse cx="{cx-28+k*14}" cy="{cy+8-(k%2)*8}" rx="{5+a*0.4:.1f}" ry="4" fill="{purple}" opacity="0.9"/>'
+                )
+            body = "".join(stones) + (
+                f'<path d="M {cx-34} {cy+24} C {cx-6} {cy-24}, {cx+12} {cy-20}, {cx+34} {cy+20}" '
+                f'fill="none" stroke="{purple}" stroke-width="3" stroke-dasharray="5 5"/>'
             )
         elif kind == "shrine":
-            # small temple: base + columns + roof
-            w = 28
-            glyphs.append(
-                f'<rect x="{cx-w/2}" y="{base_y-4}" width="{w}" height="4" fill="{color}"/>'
-                f'<rect x="{cx-w/2+2}" y="{base_y-16}" width="2" height="12" fill="{color}"/>'
-                f'<rect x="{cx+w/2-4}" y="{base_y-16}" width="2" height="12" fill="{color}"/>'
-                f'<rect x="{cx-2}" y="{base_y-16}" width="2" height="12" fill="{color}" opacity="0.85"/>'
-                f'<polygon points="{cx-w/2-2},{base_y-16} {cx+w/2+2},{base_y-16} {cx},{base_y-16-8}" fill="{color}"/>'
+            body = (
+                f'<rect x="{cx-28}" y="{cy+15}" width="56" height="7" rx="2" fill="{purple}"/>'
+                f'<rect x="{cx-22}" y="{cy-8}" width="7" height="24" fill="{purple}"/>'
+                f'<rect x="{cx-4}" y="{cy-8}" width="8" height="24" fill="{purple}" opacity="0.9"/>'
+                f'<rect x="{cx+15}" y="{cy-8}" width="7" height="24" fill="{purple}"/>'
+                f'<polygon points="{cx-34},{cy-8} {cx+34},{cy-8} {cx},{cy-28}" fill="{purple}"/>'
+                f'<circle cx="{cx}" cy="{cy-38}" r="{4+a}" fill="#FCD34D"/>'
             )
-        elif kind == "post":
-            # signpost: pole + crossarm
-            glyphs.append(
-                f'<rect x="{cx-1.5}" y="{base_y-18}" width="3" height="18" fill="{color}"/>'
-                f'<rect x="{cx-10}" y="{base_y-16}" width="20" height="5" fill="{color}" opacity="0.85"/>'
+        else:
+            body = (
+                f'<rect x="{cx-4}" y="{cy-24}" width="8" height="50" rx="3" fill="#7C4A28"/>'
+                f'<path d="M {cx-32} {cy-20} H {cx+28} L {cx+18} {cy-8} H {cx-32} Z" fill="{amber}"/>'
+                f'<path d="M {cx+30} {cy+2} H {cx-28} L {cx-18} {cy+14} H {cx+30} Z" fill="#F59E0B"/>'
             )
+        glyphs.append(_site(cx, cy, lvl, body))
         # accessibility: per-glyph title for hover/AT
-        glyphs.append(
-            f'<title>{name} — level {lvl}</title>'
-        )
-        glyphs.append(_label(cx, name, lvl))
+        glyphs.append(f'<title>{name} — level {lvl}</title>')
+        glyphs.append(_label(cx, cy, name, lvl))
 
     # Constellation: small stars across the top when unlocked
     if constellation:
         stars = []
-        for k in range(7):
-            x = (width / 8) * (k + 1)
+        for k, x in enumerate((124, 212, 326, 496, 646, 760, 832)):
             stars.append(
-                f'<circle cx="{x}" cy="14" r="1.6" fill="#6D28D9" opacity="{0.55 + (k%3)*0.15}"/>'
+                f'<path d="M {x} 38 l4 9 10 1 -8 6 2 10 -8-5 -8 5 2-10 -8-6 10-1 Z" '
+                f'fill="#FCD34D" stroke="#B45309" stroke-width="1" opacity="{0.75 + (k%2)*0.15}"/>'
             )
     else:
         stars = []
 
     return (
         f'<svg viewBox="0 0 {width} {height}" width="100%" preserveAspectRatio="xMinYMin meet" '
-        f'role="img" aria-label="Daimon Grove visualization">'
+        f'role="img" aria-label="Daimon Grove realm map">'
         f'<title>Daimon Grove</title>'
-        f'<desc>Six glyphs representing craft tracks. Each scales with its level. '
-        f'Constellation visible when at least three distinct history days exist.</desc>'
+        f'<desc>RPG-style realm map with six craft sites: Command Tree, Memory Well, Git Thorns, '
+        f'Planning Path, Tool Shrine, and Repo Signpost. Site level follows verified evidence.</desc>'
+        f'<rect x="0" y="0" width="{width}" height="{height}" rx="22" fill="#FFF8E7"/>'
+        f'<path d="M 0 255 C 130 225, 190 286, 330 248 S 590 224, 900 258 V 320 H 0 Z" fill="#E7F6DC"/>'
+        f'<path d="M 0 64 C 106 38, 214 54, 318 34 S 504 52, 630 34 S 786 48, 900 28 V 0 H 0 Z" fill="#FDECC8"/>'
+        f'<path d="M 38 280 C 136 230, 192 172, 260 126 S 352 146, 420 216 S 500 165, 560 116 '
+        f'S 650 162, 708 208 S 770 158, 810 116" fill="none" stroke="#C08457" stroke-width="13" '
+        f'stroke-linecap="round" opacity="0.35"/>'
+        f'<path d="M 38 280 C 136 230, 192 172, 260 126 S 352 146, 420 216 S 500 165, 560 116 '
+        f'S 650 162, 708 208 S 770 158, 810 116" fill="none" stroke="#7C4A28" stroke-width="3" '
+        f'stroke-linecap="round" stroke-dasharray="8 10" opacity="0.55"/>'
+        f'<text x="34" y="38" font-size="18" font-weight="800" fill="{ink}" font-family="-apple-system,sans-serif">Daimon Grove Realm Map</text>'
+        f'<text x="34" y="58" font-size="12" fill="{muted}" font-family="-apple-system,sans-serif">Sites grow only from verified craft improvements.</text>'
         + "".join(stars)
         + "".join(glyphs)
         + '</svg>'

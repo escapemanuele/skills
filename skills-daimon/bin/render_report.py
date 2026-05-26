@@ -532,43 +532,74 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .daimon-chip .dc-val{font-size:14px;font-weight:800;margin:0 2px}
 .daimon-chip .dc-xp{opacity:.75;font-weight:500}
 /* quest card */
-.quest{border-left:5px solid %(INFO)s;background:#F8FAFF}
-.quest-tag{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:%(INFO)s;
-  font-weight:700;margin-bottom:6px}
-.quest-title{margin:0 0 8px;font-size:18px;font-weight:700;color:%(INK)s}
+.quest{border:1px solid #d7bc92;background:#fff8e7;position:relative}
+.quest:before{content:"Quest Log";position:absolute;top:-11px;left:18px;background:#fff8e7;color:#8A5B21;
+  font-size:11px;text-transform:uppercase;letter-spacing:.8px;font-weight:900;padding:0 8px}
+.quest-tag{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#8A5B21;
+  font-weight:900;margin-bottom:6px}
+.quest-title{margin:0 0 8px;font-size:20px;font-weight:900;color:#2F271F}
 .quest-why{margin:6px 0;color:#374151}
-.quest-do{margin:8px 0}
-.quest-do-label{font-size:11px;font-weight:700;color:%(INFO)s;text-transform:uppercase;letter-spacing:.5px}
+.quest-do{margin:10px 0}
+.quest-do-label{font-size:11px;font-weight:900;color:%(GOOD)s;text-transform:uppercase;letter-spacing:.5px}
 .quest-do code{display:inline-block;margin-left:6px}
-.quest-reward{margin:10px 0 0;color:#374151;font-size:13.5px}
+.quest-reward{margin:10px 0 0;color:#374151;font-size:13.5px;font-weight:700}
 .quest-note{color:%(MUTED)s;font-size:12px}
 .quest-track{display:inline-block;margin:4px 0 8px;font-size:12px;color:%(MUTED)s}
-.quest-empty{border-left-color:%(MUTED)s;background:#fff}
+.quest-empty{background:#fff;border-color:%(GAP)s}
+.quest-empty:before{background:#fff;color:%(MUTED)s}
 /* grove */
-.grove-card{padding:14px 18px}
+.grove-card{padding:0;overflow:hidden;background:#fffdf8;border-color:#e7d6b6}
+.grove-banner{padding:18px 22px 16px;background:#fff4dc;border-bottom:1px solid #ead6b5}
 .grove-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
-.grove-title{margin:0;font-size:20px;font-weight:800;color:%(INK)s}
-.grove-xp{font-size:13px;color:%(MUTED)s;font-variant-numeric:tabular-nums}
-.grove-lead{margin:6px 0 8px;color:%(MUTED)s}
-.grove-summary{margin:8px 0 10px;font-size:15px;color:#374151}
-.grove-summary b{color:%(GOOD)s}
-.grove-next{margin:0 0 12px;color:#374151;font-size:13.5px}
-.grove-card svg{display:block;margin:0 auto 8px}
-.grove-status{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px}
-.grove-status-chip{font-size:12px;padding:3px 8px;border-radius:999px;background:#F3F4F6;color:%(MUTED)s}
-.grove-status-chip.on{background:#ECFDF5;color:%(GOOD)s;border:1px solid #A7F3D0}
-.grove-status-chip.need{background:#FFFBEB;color:%(WATCH)s;border:1px solid #FDE68A}
-.grove-tracks{width:100%%;border-collapse:collapse;font-size:13.5px;margin:8px 0 6px}
+.grove-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#8A5B21;font-weight:800}
+.grove-title{margin:2px 0 0;font-size:24px;font-weight:900;color:#2F271F;letter-spacing:0}
+.grove-lead{margin:6px 0 0;color:#6B5A46;max-width:68ch}
+.grove-stats{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.grove-stat{min-width:118px;background:#fffaf0;border:1px solid #ead6b5;border-radius:8px;padding:8px 10px;text-align:right}
+.grove-stat b{display:block;font-size:18px;line-height:1;color:#2F271F;font-variant-numeric:tabular-nums}
+.grove-stat span{display:block;margin-top:4px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#7B6A58}
+.grove-progress{margin-top:12px;background:#ead6b5;border-radius:999px;height:12px;overflow:hidden;border:1px solid #d7bc92}
+.grove-progress span{display:block;height:100%%;background:#0F766E;border-radius:999px}
+.grove-body{padding:16px 18px 18px}
+.grove-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:start;margin-bottom:14px}
+.grove-summary-main{font-size:16px;color:#374151}
+.grove-summary-main b{color:%(GOOD)s}
+.grove-next{margin:6px 0 0;color:#4B5563;font-size:13.5px}
+.grove-relics{display:flex;flex-wrap:wrap;gap:7px;justify-content:flex-end;max-width:360px}
+.grove-map{background:#fff8e7;border:1px solid #ead6b5;border-radius:8px;padding:8px;margin-bottom:14px}
+.grove-map svg{display:block;width:100%%;height:auto}
+.grove-skills{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.grove-skill{border:1px solid #ead6b5;border-radius:8px;background:#fff;padding:12px;min-height:132px}
+.grove-skill.changed{border-color:#A7F3D0;background:#F0FDF4}
+.grove-skill.needs{border-color:#FDE68A;background:#FFFBEB}
+.grove-skill-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.grove-sigil{width:34px;height:34px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;
+  background:#F3E8FF;color:%(ACCENT)s;font-size:12px;font-weight:900;border:1px solid #DDD6FE}
+.grove-skill.changed .grove-sigil{background:#D1FAE5;color:%(GOOD)s;border-color:#A7F3D0}
+.grove-skill.needs .grove-sigil{background:#FEF3C7;color:%(WATCH)s;border-color:#FDE68A}
+.grove-skill-title{font-weight:800;color:#2F271F;line-height:1.15}
+.grove-skill-meta{font-size:12px;color:%(MUTED)s;font-variant-numeric:tabular-nums}
+.grove-skill-delta{display:inline-block;margin-bottom:7px;font-size:12px;font-weight:800;border-radius:999px;padding:3px 8px;background:#F3F4F6;color:%(MUTED)s}
+.grove-skill-delta.changed{background:#D1FAE5;color:%(GOOD)s}
+.grove-skill-delta.needs{background:#FEF3C7;color:%(WATCH)s}
+.grove-skill-evidence{font-size:12.5px;color:#4B5563;line-height:1.4}
+.grove-ledger{border-top:1px solid #ead6b5;padding-top:10px}
+.grove-ledger summary{cursor:pointer;color:#6B5A46;font-weight:800;font-size:13px;list-style:none}
+.grove-ledger summary::-webkit-details-marker{display:none}
+.grove-ledger summary:before{content:"▸";display:inline-block;margin-right:6px;color:%(MUTED)s}
+.grove-ledger[open] summary:before{transform:rotate(90deg)}
+.grove-tracks{width:100%%;border-collapse:collapse;font-size:13px;margin:10px 0 6px}
 .grove-tracks th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
   color:%(MUTED)s;border-bottom:1px solid %(GAP)s;padding:6px 8px}
-.grove-tracks td{padding:6px 8px;border-bottom:1px solid #f1f2f5}
+.grove-tracks td{padding:7px 8px;border-bottom:1px solid #f1f2f5}
 .grove-tracks td.num,.grove-tracks th.num{text-align:right;font-variant-numeric:tabular-nums}
 .grove-ev{color:%(MUTED)s;font-size:13px}
 .delta-flat{color:%(MUTED)s}
-.grove-badges{margin-top:8px;display:flex;flex-wrap:wrap;gap:8px}
-.grove-badge{font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid %(GAP)s}
-.grove-badge.on{background:#ECFDF5;border-color:#A7F3D0;color:%(GOOD)s;font-weight:600}
+.grove-badge{font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid %(GAP)s}
+.grove-badge.on{background:#ECFDF5;border-color:#A7F3D0;color:%(GOOD)s;font-weight:700}
 .grove-badge.off{color:%(MUTED)s;background:#fff}
+.grove-cap{margin:10px 0 0;color:%(MUTED)s;font-size:12px;text-align:center}
+@media(max-width:760px){.grove-summary{grid-template-columns:1fr}.grove-relics{justify-content:flex-start}.grove-skills{grid-template-columns:1fr}.grove-stat{text-align:left}}
 /* catalog source strip (outside the hero now) */
 .srcstrip{padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .srclabel-dark{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
@@ -639,7 +670,7 @@ def _gamify_blocks(payload: dict, m: dict):
     if quest:
         quest_html = (
             '<section class="quest card">'
-            '<div class="quest-tag">Active quest</div>'
+            '<div class="quest-tag">Quest Log · Active quest</div>'
             f'<h2 class="quest-title">{esc(quest.get("title"))}</h2>'
             f'<span class="quest-track">Track: {esc(_gamify.display_track_name(quest.get("track","")))}</span>'
             f'<p class="quest-why">{esc(quest.get("why",""))}</p>'
@@ -651,7 +682,7 @@ def _gamify_blocks(payload: dict, m: dict):
     else:
         quest_html = (
             '<section class="quest quest-empty card">'
-            '<div class="quest-tag">Active quest</div>'
+            '<div class="quest-tag">Quest Log</div>'
             '<h2 class="quest-title">No active quest this run</h2>'
             '<p class="quest-why">The report did not find a strong enough evidence-backed opportunity.</p>'
             '</section>'
@@ -660,17 +691,61 @@ def _gamify_blocks(payload: dict, m: dict):
     # Grove + XP movements.
     earned = sum(1 for b in gs.get("badges", []) if b.get("earned"))
     delta_total = int(summary.get("xp_delta_total") or 0)
+    xp_total = int(gs.get("xp_total") or 0)
+    daimon_level = int(gs.get("daimon_level") or 0)
+    thresholds = getattr(_gamify, "DAIMON_LEVEL_THRESHOLDS", (0, 100))
+    floor_idx = max(0, min(daimon_level - 1, len(thresholds) - 1))
+    next_idx = max(0, min(daimon_level, len(thresholds) - 1))
+    level_floor = int(thresholds[floor_idx])
+    next_level_xp = int(thresholds[next_idx])
+    if next_level_xp <= level_floor:
+        progress_pct = 100
+        progress_label = "Max rank reached"
+    else:
+        progress_pct = max(0, min(100, round(100 * (xp_total - level_floor) / (next_level_xp - level_floor))))
+        progress_label = f'{max(0, next_level_xp - xp_total)} XP to Level {daimon_level + 1}'
+
     track_rows = []
+    skill_cards = []
+    sigils = {
+        "automation": "CT",
+        "memory": "MW",
+        "safety": "GT",
+        "planning": "PP",
+        "tool_fluency": "TS",
+        "project_hygiene": "RS",
+    }
     for track_id in _gamify.TRACKS:
         t = gs["tracks"].get(track_id) or {}
         delta = int(t.get("delta") or 0)
         status = t.get("status") or ""
         delta_cls = "delta down" if delta > 0 else "delta-flat"
+        card_cls = "grove-skill"
+        delta_badge_cls = "grove-skill-delta"
+        if delta > 0:
+            card_cls += " changed"
+            delta_badge_cls += " changed"
+        elif status == "needs_data":
+            card_cls += " needs"
+            delta_badge_cls += " needs"
+        delta_label = esc(t.get("delta_label") or _gamify.format_delta(delta, status))
+        skill_cards.append(
+            f'<article class="{card_cls}">'
+            '<div class="grove-skill-head">'
+            f'<span class="grove-sigil">{esc(sigils.get(track_id, ""))}</span>'
+            '<div>'
+            f'<div class="grove-skill-title">{esc(t.get("grove_area") or t.get("name") or _gamify.display_track_name(track_id))}</div>'
+            f'<div class="grove-skill-meta">{esc(t.get("name") or _gamify.display_track_name(track_id))} · L{int(t.get("level") or 0)} · {int(t.get("xp") or 0)} XP</div>'
+            '</div></div>'
+            f'<span class="{delta_badge_cls}">{delta_label}</span>'
+            f'<div class="grove-skill-evidence">{esc(t.get("evidence",""))}</div>'
+            '</article>'
+        )
         track_rows.append(
             f'<tr><td>{esc(t.get("name") or _gamify.display_track_name(track_id))}</td>'
             f'<td class="num">L{int(t.get("level") or 0)}</td>'
             f'<td class="num">{int(t.get("xp") or 0)} XP</td>'
-            f'<td class="num"><span class="{delta_cls}">{esc(t.get("delta_label") or _gamify.format_delta(delta, status))}</span></td>'
+            f'<td class="num"><span class="{delta_cls}">{delta_label}</span></td>'
             f'<td class="grove-ev">{esc(t.get("evidence",""))}</td></tr>'
         )
     earned_badges = [b for b in gs.get("badges", []) if b.get("earned")]
@@ -680,34 +755,45 @@ def _gamify_blocks(payload: dict, m: dict):
     )
     if not badges_html:
         badges_html = '<span class="grove-badge off">No badges earned yet. Badges unlock from verified milestones.</span>'
-    status_html = ""
-    for label in summary.get("status_labels") or []:
-        cls = "grove-status-chip"
-        if any(word in label for word in ("grew", "filled", "receded", "extended", "brightened", "appeared")):
-            cls += " on"
-        elif "needs data" in label or "need data" in label:
-            cls += " need"
-        status_html += f'<span class="{cls}">{esc(label)}</span>'
     rhythm_count = len(gs.get("rhythms") or {})
     grove_html = (
         '<div class="card grove-card">'
+        '<div class="grove-banner">'
         '<div class="grove-head">'
-        f'<h2 class="grove-title">Daimon Grove · Level {int(gs.get("daimon_level") or 0)}</h2>'
-        f'<div class="grove-xp">{int(gs.get("xp_total") or 0)} total XP</div>'
-        '</div>'
+        '<div>'
+        '<div class="grove-kicker">RPG progress, evidence locked</div>'
+        f'<h2 class="grove-title">Daimon Grove · Level {daimon_level}</h2>'
         '<p class="grove-lead">Your grove grows only when the report verifies a real habit improvement.</p>'
-        f'<p class="grove-summary"><b>+{delta_total} XP verified this run.</b> '
-        f'{esc(summary.get("change_sentence",""))}</p>'
+        '</div>'
+        '<div class="grove-stats">'
+        f'<div class="grove-stat"><b>{xp_total}</b><span>Total XP</span></div>'
+        f'<div class="grove-stat"><b>+{delta_total}</b><span>Verified this run</span></div>'
+        f'<div class="grove-stat"><b>{earned}</b><span>Relics</span></div>'
+        '</div>'
+        '</div>'
+        f'<div class="grove-progress" aria-label="{esc(progress_label)}"><span style="width:{progress_pct}%"></span></div>'
+        f'<p class="cap">{esc(progress_label)}</p>'
+        '</div>'
+        '<div class="grove-body">'
+        '<div class="grove-summary">'
+        '<div class="grove-summary-main">'
+        f'<b>+{delta_total} XP verified this run.</b> {esc(summary.get("change_sentence",""))}'
         f'<p class="grove-next">{esc(summary.get("next_quest",""))}</p>'
-        f'{_gamify.render_grove_svg(gs["grove"])}'
-        f'<div class="grove-status">{status_html}</div>'
+        '</div>'
+        f'<div class="grove-relics">{badges_html}</div>'
+        '</div>'
+        f'<div class="grove-map">{_gamify.render_grove_svg(gs["grove"])}</div>'
+        f'<div class="grove-skills">{"".join(skill_cards)}</div>'
+        '<details class="grove-ledger">'
+        '<summary>Evidence ledger</summary>'
         '<table class="grove-tracks">'
         '<thead><tr><th>Track</th><th class="num">Level</th><th class="num">XP</th>'
         '<th class="num">This run</th><th>Evidence receipt</th></tr></thead>'
         f'<tbody>{"".join(track_rows)}</tbody></table>'
-        f'<div class="grove-badges">{badges_html}</div>'
-        f'<p class="cap">Badges earned: {earned} · Quests verified: {int(gs.get("quests_completed_count",0))} · '
-        f'Rhythm signals tracked: {rhythm_count}</p>'
+        '</details>'
+        f'<p class="grove-cap">Relics earned: {earned} · Quests verified: {int(gs.get("quests_completed_count",0))} · '
+        f'Habit signals stored as numbers only: {rhythm_count}</p>'
+        '</div>'
         '</div>'
     )
 
