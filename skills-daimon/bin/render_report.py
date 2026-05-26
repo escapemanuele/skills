@@ -67,6 +67,17 @@ def esc(s) -> str:
     return html.escape(str(s if s is not None else ""))
 
 
+def safe_metric_text(s) -> str:
+    text = str(s if s is not None else "")
+    if "0% of 0" in text or "0 of 0 sessions" in text:
+        return "Not enough session data to evaluate this area."
+    return text
+
+
+def esc_metric(s) -> str:
+    return esc(safe_metric_text(s))
+
+
 def bar_chart(data: dict, title: str, top: int = 10, color: str = BAR) -> str:
     """Horizontal bar chart as inline SVG from a {label: count} dict."""
     items = sorted(data.items(), key=lambda kv: kv[1], reverse=True)[:top]
@@ -177,8 +188,8 @@ def scorecard_strip(items: list, history_by_key: dict | None = None) -> str:
     for it in items:
         v = it.get("verdict", "warn")
         vlabel = VERDICT_LABEL.get(v, "")
-        note = esc(it.get("note", ""))
-        explain = esc(it.get("explain", ""))
+        note = esc_metric(it.get("note", ""))
+        explain = esc_metric(it.get("explain", ""))
         body = note
         if explain:
             body += f'<div class="scexplain">{explain}</div>'
@@ -192,8 +203,8 @@ def scorecard_strip(items: list, history_by_key: dict | None = None) -> str:
             '<details class="scrow">'
             '<summary>'
             '<span class="scchev">▸</span>'
-            f'<div class="scmain"><div class="sclabel">{esc(it.get("label", ""))}</div></div>'
-            f'<div class="scval">{esc(it.get("value", ""))}{delta}</div>'
+            f'<div class="scmain"><div class="sclabel">{esc_metric(it.get("label", ""))}</div></div>'
+            f'<div class="scval">{esc_metric(it.get("value", ""))}{delta}</div>'
             f'<div class="scspark">{spark}</div>'
             f'<span class="verdict {_verdict_class(v)}">{vlabel}</span>'
             '</summary>'
@@ -531,9 +542,22 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .quest-do code{display:inline-block;margin-left:6px}
 .quest-reward{margin:10px 0 0;color:#374151;font-size:13.5px}
 .quest-note{color:%(MUTED)s;font-size:12px}
+.quest-track{display:inline-block;margin:4px 0 8px;font-size:12px;color:%(MUTED)s}
+.quest-empty{border-left-color:%(MUTED)s;background:#fff}
 /* grove */
 .grove-card{padding:14px 18px}
+.grove-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.grove-title{margin:0;font-size:20px;font-weight:800;color:%(INK)s}
+.grove-xp{font-size:13px;color:%(MUTED)s;font-variant-numeric:tabular-nums}
+.grove-lead{margin:6px 0 8px;color:%(MUTED)s}
+.grove-summary{margin:8px 0 10px;font-size:15px;color:#374151}
+.grove-summary b{color:%(GOOD)s}
+.grove-next{margin:0 0 12px;color:#374151;font-size:13.5px}
 .grove-card svg{display:block;margin:0 auto 8px}
+.grove-status{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px}
+.grove-status-chip{font-size:12px;padding:3px 8px;border-radius:999px;background:#F3F4F6;color:%(MUTED)s}
+.grove-status-chip.on{background:#ECFDF5;color:%(GOOD)s;border:1px solid #A7F3D0}
+.grove-status-chip.need{background:#FFFBEB;color:%(WATCH)s;border:1px solid #FDE68A}
 .grove-tracks{width:100%%;border-collapse:collapse;font-size:13.5px;margin:8px 0 6px}
 .grove-tracks th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
   color:%(MUTED)s;border-bottom:1px solid %(GAP)s;padding:6px 8px}
@@ -608,55 +632,82 @@ def _gamify_blocks(payload: dict, m: dict):
         f'</div>'
     )
 
-    # Quest card (after primary action).
+    summary = gs.get("grove_summary") or _gamify.build_grove_summary(gs)
+
+    # Quest card (after compact Grove summary).
     quest = gs.get("active_quest")
     if quest:
         quest_html = (
             '<section class="quest card">'
-            '<div class="quest-tag">⚜ Quest offered</div>'
+            '<div class="quest-tag">Active quest</div>'
             f'<h2 class="quest-title">{esc(quest.get("title"))}</h2>'
+            f'<span class="quest-track">Track: {esc(_gamify.display_track_name(quest.get("track","")))}</span>'
             f'<p class="quest-why">{esc(quest.get("why",""))}</p>'
             f'<div class="quest-do"><span class="quest-do-label">Do</span>'
             f' <code>{esc(quest.get("do",""))}</code></div>'
-            f'<p class="quest-reward"><b>Reward.</b> {esc(quest.get("reward",""))} '
-            '<span class="quest-note">(XP is awarded only when the next scan verifies the improvement.)</span></p>'
+            f'<p class="quest-reward"><b>Reward.</b> {esc(quest.get("reward",""))}</p>'
             '</section>'
         )
     else:
-        quest_html = ""
-
-    # Grove + XP movements (near trends, below activity bars).
-    earned = sum(1 for b in gs.get("badges", []) if b.get("earned"))
-    track_rows = []
-    for tname, t in gs["tracks"].items():
-        delta = int(t["delta"])
-        delta_html = (
-            f'<span class="delta down">+{delta}</span>' if delta > 0
-            else '<span class="delta-flat">·</span>'
+        quest_html = (
+            '<section class="quest quest-empty card">'
+            '<div class="quest-tag">Active quest</div>'
+            '<h2 class="quest-title">No active quest this run</h2>'
+            '<p class="quest-why">The report did not find a strong enough evidence-backed opportunity.</p>'
+            '</section>'
         )
+
+    # Grove + XP movements.
+    earned = sum(1 for b in gs.get("badges", []) if b.get("earned"))
+    delta_total = int(summary.get("xp_delta_total") or 0)
+    track_rows = []
+    for track_id in _gamify.TRACKS:
+        t = gs["tracks"].get(track_id) or {}
+        delta = int(t.get("delta") or 0)
+        status = t.get("status") or ""
+        delta_cls = "delta down" if delta > 0 else "delta-flat"
         track_rows.append(
-            f'<tr><td>{esc(tname)}</td>'
-            f'<td class="num">L{int(t["level"])}</td>'
-            f'<td class="num">{int(t["xp"])} XP</td>'
-            f'<td class="num">{delta_html}</td>'
+            f'<tr><td>{esc(t.get("name") or _gamify.display_track_name(track_id))}</td>'
+            f'<td class="num">L{int(t.get("level") or 0)}</td>'
+            f'<td class="num">{int(t.get("xp") or 0)} XP</td>'
+            f'<td class="num"><span class="{delta_cls}">{esc(t.get("delta_label") or _gamify.format_delta(delta, status))}</span></td>'
             f'<td class="grove-ev">{esc(t.get("evidence",""))}</td></tr>'
         )
-    badges_html = " · ".join(
-        f'<span class="grove-badge {"on" if b["earned"] else "off"}">{esc(b["name"])}</span>'
-        for b in gs.get("badges", [])
+    earned_badges = [b for b in gs.get("badges", []) if b.get("earned")]
+    badges_html = "".join(
+        f'<span class="grove-badge on">{esc(b["name"])}</span>'
+        for b in earned_badges
     )
+    if not badges_html:
+        badges_html = '<span class="grove-badge off">No badges earned yet. Badges unlock from verified milestones.</span>'
+    status_html = ""
+    for label in summary.get("status_labels") or []:
+        cls = "grove-status-chip"
+        if any(word in label for word in ("grew", "filled", "receded", "extended", "brightened", "appeared")):
+            cls += " on"
+        elif "needs data" in label or "need data" in label:
+            cls += " need"
+        status_html += f'<span class="{cls}">{esc(label)}</span>'
+    rhythm_count = len(gs.get("rhythms") or {})
     grove_html = (
-        '<h2 class="sec">🌲 Daimon Grove</h2>'
-        '<p class="seclead">Conservative gamification. XP is only awarded when the next scan verifies the improvement — never just for running the report.</p>'
         '<div class="card grove-card">'
+        '<div class="grove-head">'
+        f'<h2 class="grove-title">Daimon Grove · Level {int(gs.get("daimon_level") or 0)}</h2>'
+        f'<div class="grove-xp">{int(gs.get("xp_total") or 0)} total XP</div>'
+        '</div>'
+        '<p class="grove-lead">Your grove grows only when the report verifies a real habit improvement.</p>'
+        f'<p class="grove-summary"><b>+{delta_total} XP verified this run.</b> '
+        f'{esc(summary.get("change_sentence",""))}</p>'
+        f'<p class="grove-next">{esc(summary.get("next_quest",""))}</p>'
         f'{_gamify.render_grove_svg(gs["grove"])}'
+        f'<div class="grove-status">{status_html}</div>'
         '<table class="grove-tracks">'
         '<thead><tr><th>Track</th><th class="num">Level</th><th class="num">XP</th>'
-        '<th class="num">Δ this run</th><th>Evidence</th></tr></thead>'
+        '<th class="num">This run</th><th>Evidence receipt</th></tr></thead>'
         f'<tbody>{"".join(track_rows)}</tbody></table>'
         f'<div class="grove-badges">{badges_html}</div>'
-        f'<p class="cap">Badges earned: {earned} · Quests offered: {int(gs.get("quests_offered_count",0))} · '
-        f'Quests verified: {int(gs.get("quests_completed_count",0))}</p>'
+        f'<p class="cap">Badges earned: {earned} · Quests verified: {int(gs.get("quests_completed_count",0))} · '
+        f'Rhythm signals tracked: {rhythm_count}</p>'
         '</div>'
     )
 
@@ -762,19 +813,6 @@ def render(payload: dict) -> str:
         if coaching else ""
     )
 
-    # ─── ACTIVITY BARS (context only, at the bottom) ───────────────────────
-    chart_blocks = []
-    if charts.get("tool_use_top"):
-        chart_blocks.append(bar_chart(charts["tool_use_top"], "Tool use", top=8, color=BAR))
-    if charts.get("bash_verbs_top"):
-        chart_blocks.append(bar_chart(charts["bash_verbs_top"], "Top bash verbs", top=10, color=INFO))
-    charts_html = (
-        '<h2 class="sec">📊 Your activity — just for context</h2>'
-        '<p class="seclead">Raw counts, no score. Just what you ran most.</p>'
-        f'<div class="charts">{"".join(chart_blocks)}</div>'
-        if chart_blocks else ""
-    )
-
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -783,19 +821,24 @@ def render(payload: dict) -> str:
         + hero_html
         + arch_html
         + pa_html
-        + quest_html        # the one active quest, right after the primary action
+        + grove_html        # compact gamification, after core diagnosis/action
+        + quest_html        # one active quest or explicit no-quest explanation
         + catalog_strip
-        + recs_html         # main focus, immediately after the primary action
+        + recs_html         # catalog-backed recommendations, still above evidence details
         + recap_html
         + scorecard_html
         + gaps_html
         + coach_html
-        + charts_html
-        + grove_html        # Daimon Grove: gamification stays below the evidence
         + '<footer>🏛 Generated by <b>Skills Daimon</b> · evidence from your own '
           'Claude Code sessions · nothing left this machine 🔒</footer>'
         "</div></body></html>"
     )
+
+
+def render_redacted(payload: dict) -> str:
+    """Render with the shared redactor on input payload and HTML write output."""
+    safe_payload = redact_in(payload)
+    return redact_in(render(safe_payload))
 
 
 def main() -> int:
@@ -811,7 +854,7 @@ def main() -> int:
     out_dir = Path.home() / ".claude" / "skills" / "skills-daimon" / "reports"
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"skills-daimon-{date}.html"
-    out.write_text(render(payload), encoding="utf-8")
+    out.write_text(redact_in(render(payload)), encoding="utf-8")
 
     print(json.dumps({
         "path": str(out),

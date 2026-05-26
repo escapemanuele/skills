@@ -19,6 +19,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 
 import gamify  # noqa: E402
+import history as history_mod  # noqa: E402
+import render_report  # noqa: E402
 from gamify import (  # noqa: E402
     BADGE_ORDER, GAME_SCHEMA_VERSION, MAX_DELTA_PER_TRACK, TRACKS,
     build_game_state, numeric_game_history_snapshot, render_grove_svg,
@@ -93,7 +95,8 @@ def _history(today="2026-05-25"):
 
 PRIVACY_BLOCKLIST = (
     "/Users/u/", "/Users/", "Dragon Lodge", "repo-a", "repo-b",
-    "session_id", "Authorization", "sk-",
+    "session_id", "Authorization", "sk-", "git reset --hard",
+    "Quest Secret", "Badge Secret",
 )
 
 
@@ -114,12 +117,22 @@ def _gather_strings(obj):
     return []
 
 
+def _render_with_history(payload, entries=None):
+    old = history_mod.read_last
+    history_mod.read_last = lambda *args, **kwargs: list(entries or [])
+    try:
+        return render_report.render(payload)
+    finally:
+        history_mod.read_last = old
+
+
 class TestGamifyDeterminism(unittest.TestCase):
     def test_same_inputs_same_output(self):
         a = build_game_state(SAMPLE_PAYLOAD, _history(), today="2026-05-25", window_days=28)
         b = build_game_state(SAMPLE_PAYLOAD, _history(), today="2026-05-25", window_days=28)
         self.assertEqual(json.dumps(a, sort_keys=True),
                          json.dumps(b, sort_keys=True))
+        self.assertEqual(render_grove_svg(a["grove"]), render_grove_svg(b["grove"]))
 
     def test_schema_version_present(self):
         s = build_game_state(SAMPLE_PAYLOAD, _history(), today="2026-05-25")
@@ -201,7 +214,7 @@ class TestQuestSelection(unittest.TestCase):
                           "friction_sessions": {},
                           "friction_counts_sum": {}},
             "tool_errors": {"Bash": {"ok": 100, "error": 0}},
-            "memory_events": {"sessions_with_memory": 30},
+            "memory_events": {"sessions_with_memory": 30, "verified_saved_learnings": 3},
             "coaching_signals": {
                 "native_tool_bypass": {"bypass_total": 10,
                                         "native_tool_use": {"Read": 500}},
@@ -244,7 +257,7 @@ class TestHistorySnapshotShape(unittest.TestCase):
         allowed_prefixes = (
             "game_schema_version", "xp_total", "daimon_level", "badge_count",
             "badges_mask", "quests_offered_count", "quests_completed_count",
-            "xp_", "level_", "delta_", "grove_", "constellation",
+            "xp_", "level_", "delta_", "grove_", "constellation", "rhythm_",
         )
         for k in snap:
             self.assertTrue(
@@ -286,6 +299,204 @@ class TestBadgesAndConstellation(unittest.TestCase):
         s = build_game_state(SAMPLE_PAYLOAD, _history(), today="2026-05-25")
         earned = {b["id"]: b["earned"] for b in s["badges"]}
         self.assertFalse(earned["safe_hands"])
+
+
+class TestConservativeBadges(unittest.TestCase):
+    def _clean_payload(self):
+        return {
+            "session_count": 30,
+            "outcomes": {
+                "coverage": {"labeled": 20, "total": 30},
+                "by_facet": {"fully_achieved": 15, "mostly_achieved": 3},
+                "friction_sessions": {},
+                "friction_counts_sum": {},
+            },
+            "tool_errors": {"Bash": {"ok": 100, "error": 0}},
+            "memory_events": {"sessions_with_memory": 12, "verified_saved_learnings": 3},
+            "coaching_signals": {
+                "native_tool_bypass": {"bypass_total": 1, "native_tool_use": {"Read": 20}},
+                "destructive_cmds": [],
+                "hot_repos_without_claudemd": [],
+            },
+            "recurring_prompts": [],
+            "work_recap": {"top_projects": [{"path": "/x/repo", "kind": "dev", "sessions": 6}]},
+            "installed_skills": ["prompt-to-command"],
+            "stuck_loops": [],
+        }
+
+    def test_repo_warden_requires_active_repo_total(self):
+        p = self._clean_payload()
+        p["work_recap"]["top_projects"] = []
+        s = build_game_state(p, None, today="2026-05-25")
+        earned = {b["id"]: b["earned"] for b in s["badges"]}
+        self.assertFalse(earned["repo_warden"])
+
+    def test_pathfinder_requires_three_distinct_decreasing_days(self):
+        p = self._clean_payload()
+        p["outcomes"]["friction_sessions"] = {"wrong_approach": 2}
+        p["outcomes"]["friction_counts_sum"] = {"wrong_approach": 2}
+        hist = [
+            {"date": "2026-05-21", "window_days": 28, "labeled": 20,
+             "scorecard": {"wrong_approach_pct": 30, "risky_git_count": 0},
+             "game": {f"xp_{t}": 0 for t in TRACKS}},
+            {"date": "2026-05-23", "window_days": 28, "labeled": 20,
+             "scorecard": {"wrong_approach_pct": 20, "risky_git_count": 0},
+             "game": {f"xp_{t}": 0 for t in TRACKS}},
+        ]
+        s = build_game_state(p, hist, today="2026-05-25")
+        earned = {b["id"]: b["earned"] for b in s["badges"]}
+        self.assertTrue(earned["pathfinder"])
+
+        s2 = build_game_state(p, hist[:1], today="2026-05-25")
+        earned2 = {b["id"]: b["earned"] for b in s2["badges"]}
+        self.assertFalse(earned2["pathfinder"])
+
+    def test_pathfinder_blocks_not_enough_labeled_sessions(self):
+        p = self._clean_payload()
+        p["outcomes"]["coverage"] = {"labeled": 0, "total": 30}
+        p["outcomes"]["friction_sessions"] = {}
+        p["outcomes"]["friction_counts_sum"] = {}
+        hist = [
+            {"date": "2026-05-21", "window_days": 28, "labeled": 20,
+             "scorecard": {"wrong_approach_pct": 30}, "game": {}},
+            {"date": "2026-05-23", "window_days": 28, "labeled": 20,
+             "scorecard": {"wrong_approach_pct": 20}, "game": {}},
+        ]
+        s = build_game_state(p, hist, today="2026-05-25")
+        earned = {b["id"]: b["earned"] for b in s["badges"]}
+        self.assertFalse(earned["pathfinder"])
+
+    def test_safe_hands_requires_three_zero_windows(self):
+        p = self._clean_payload()
+        one_prior = [{"date": "2026-05-23", "window_days": 28,
+                      "scorecard": {"risky_git_count": 0}, "game": {}}]
+        s = build_game_state(p, one_prior, today="2026-05-25")
+        earned = {b["id"]: b["earned"] for b in s["badges"]}
+        self.assertFalse(earned["safe_hands"])
+
+        two_prior = one_prior + [{"date": "2026-05-24", "window_days": 28,
+                                  "scorecard": {"risky_git_count": 0}, "game": {}}]
+        s2 = build_game_state(p, two_prior, today="2026-05-25")
+        earned2 = {b["id"]: b["earned"] for b in s2["badges"]}
+        self.assertTrue(earned2["safe_hands"])
+
+    def test_memory_keeper_requires_three_saved_learnings(self):
+        p = self._clean_payload()
+        p["memory_events"]["verified_saved_learnings"] = 2
+        s = build_game_state(p, None, today="2026-05-25")
+        earned = {b["id"]: b["earned"] for b in s["badges"]}
+        self.assertFalse(earned["memory_keeper"])
+
+
+class TestQuestXpSeparation(unittest.TestCase):
+    def test_offering_quest_does_not_award_xp(self):
+        p = {
+            "session_count": 20,
+            "outcomes": {"coverage": {"labeled": 20, "total": 20},
+                          "by_facet": {"fully_achieved": 20},
+                          "friction_sessions": {}, "friction_counts_sum": {}},
+            "tool_errors": {"Bash": {"ok": 100, "error": 0}},
+            "memory_events": {"sessions_with_memory": 10, "verified_saved_learnings": 3},
+            "coaching_signals": {"native_tool_bypass": {"bypass_total": 0, "native_tool_use": {"Read": 20}},
+                                  "destructive_cmds": [], "hot_repos_without_claudemd": []},
+            "recurring_prompts": [{"prompt": "secret raw prompt", "count": 8}],
+            "work_recap": {"top_projects": [{"path": "/x/repo", "kind": "dev", "sessions": 3}]},
+            "installed_skills": [],
+            "stuck_loops": [],
+        }
+        hist = [{"date": "2026-05-23", "window_days": 28,
+                 "scorecard": {"unsaved_prompts": 8}, "game": {f"xp_{t}": 0 for t in TRACKS}}]
+        s = build_game_state(p, hist, today="2026-05-25")
+        self.assertEqual(s["active_quest"]["id"], "plant_command_tree")
+        self.assertEqual(s["tracks"]["automation"]["delta"], 0)
+        self.assertEqual(s["tracks"]["automation"]["xp"], 0)
+
+    def test_xp_awarded_after_verified_improvement(self):
+        p = json.loads(json.dumps(SAMPLE_PAYLOAD))
+        p["coaching_signals"]["destructive_cmds"] = []
+        p["coaching_signals"]["hot_repos_without_claudemd"] = []
+        p["recurring_prompts"] = [{"prompt": "secret raw prompt", "count": 2}]
+        p["command_events"] = {"saved_from_repeated_prompt": 1}
+        p["memory_events"]["verified_saved_learnings"] = 3
+        hist = [{"date": "2026-05-23", "window_days": 28,
+                 "scorecard": {"unsaved_prompts": 8},
+                 "game": {f"xp_{t}": 0 for t in TRACKS}}]
+        s = build_game_state(p, hist, today="2026-05-25")
+        self.assertEqual(s["tracks"]["automation"]["delta"], 35)
+        self.assertIn("verified as saved into a command", s["tracks"]["automation"]["evidence"])
+
+
+class TestDisplayPolish(unittest.TestCase):
+    def test_no_meaningless_zero_denominator_in_html(self):
+        payload = {
+            "meta": {"days": 28, "date": "2026-05-25"},
+            "session_count": 0,
+            "outcomes": {"coverage": {"labeled": 0, "total": 0},
+                          "by_facet": {}, "friction_sessions": {}, "friction_counts_sum": {}},
+            "tool_errors": {"Bash": {"ok": 0, "error": 0}},
+            "memory_events": {"sessions_with_memory": 0},
+            "coaching_signals": {"native_tool_bypass": {"bypass_total": 0, "native_tool_use": {}},
+                                  "destructive_cmds": [], "hot_repos_without_claudemd": []},
+            "recurring_prompts": [],
+            "work_recap": {"top_projects": []},
+            "installed_skills": [],
+            "stuck_loops": [],
+            "scorecard": [{
+                "label": "Memory",
+                "value": "0% of 0 sessions",
+                "verdict": "no_data",
+                "note": "Memory used in 0% of 0 sessions.",
+                "explain": "0 of 0 sessions had memory activity.",
+            }],
+        }
+        html = _render_with_history(payload, [])
+        self.assertNotIn("0% of 0", html)
+        self.assertNotIn("0 of 0 sessions", html)
+        self.assertIn("Not enough session data to evaluate this area.", html)
+
+    def test_grove_display_uses_human_labels_and_clear_delta(self):
+        payload = json.loads(json.dumps(SAMPLE_PAYLOAD))
+        payload["meta"] = {"days": 28, "date": "2026-05-25"}
+        payload["command_events"] = {"saved_from_repeated_prompt": 1}
+        html = _render_with_history(payload, _history())
+        self.assertIn("Daimon Grove · Level", html)
+        self.assertIn("XP verified this run", html)
+        self.assertIn("Tool Fluency", html)
+        self.assertIn("Project Hygiene", html)
+        self.assertNotIn("tool_fluency", html)
+        self.assertNotIn("project_hygiene", html)
+        self.assertNotIn('<span class="delta-flat">·</span>', html)
+        self.assertTrue("Active quest" in html or "No active quest this run" in html)
+
+
+class TestRedactionBoundaries(unittest.TestCase):
+    def test_render_redacted_masks_html_output(self):
+        payload = {
+            "meta": {"days": 28, "date": "2026-05-25"},
+            "verdict": {"name": "Snapshot",
+                         "summary": "token sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                         "evidence_chips": [], "next_phrase": ""},
+        }
+        old = history_mod.read_last
+        history_mod.read_last = lambda *args, **kwargs: []
+        try:
+            html = render_report.render_redacted(payload)
+        finally:
+            history_mod.read_last = old
+        self.assertNotIn("sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAA", html)
+        self.assertIn("sk-&lt;REDACTED&gt;", html)
+
+    def test_history_game_drops_non_numeric_strings(self):
+        scrubbed = history_mod._scrub_snapshot({
+            "date": "2026-05-25",
+            "window_days": 28,
+            "sessions": 1,
+            "labeled": 1,
+            "scorecard": {"safe": 1, "evidence": "git reset --hard"},
+            "game": {"xp_total": 10, "quest_title": "Quest Secret", "badge_name": "Badge Secret"},
+        })
+        self.assertEqual(scrubbed["game"], {"xp_total": 10})
+        self.assertNotIn("evidence", scrubbed["scorecard"])
 
 
 if __name__ == "__main__":
