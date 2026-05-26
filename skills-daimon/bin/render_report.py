@@ -665,12 +665,11 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .quest-track{display:inline-block;margin:4px 0 8px;font-size:12px;color:%(MUTED)s}
 .quest-empty{background:#fff;border-color:%(GAP)s;border-left-color:%(MUTED)s}
 .quest-empty .quest-tag{background:%(MUTED)s}
-.quest-jump{display:inline-block;margin-top:14px;background:#B45309;color:#fff;text-decoration:none;
-  font-size:13px;font-weight:800;letter-spacing:.3px;padding:8px 14px;border-radius:8px;
-  border:1px solid #8A5B21}
-.quest-jump:hover{background:#92400E}
-.quest-empty .quest-jump{background:%(MUTED)s;border-color:%(MUTED)s}
-.quest-empty .quest-jump:hover{background:#4B5563}
+.quest-jump{display:inline;color:#8A5B21;text-decoration:underline;text-underline-offset:2px;
+  font-size:12.5px;font-weight:600;margin-left:6px}
+.quest-jump:hover{color:#B45309}
+.quest-empty .quest-jump{color:%(MUTED)s}
+.quest-empty .quest-jump:hover{color:#4B5563}
 html{scroll-behavior:smooth}
 /* grove */
 .grove-card{padding:0;overflow:hidden;background:#fffdf8;border-color:#e7d6b6}
@@ -805,9 +804,9 @@ def _gamify_blocks(payload: dict, m: dict):
             f'<p class="quest-why">{esc(quest.get("why",""))}</p>'
             f'<div class="quest-do"><span class="quest-do-label">Do</span>'
             f' <code>{esc(quest.get("do",""))}</code></div>'
-            f'<p class="quest-reward"><b>Reward.</b> {esc(quest.get("reward",""))}'
+            f'<p class="quest-reward"><b>Reward.</b> {esc(quest.get("reward",""))} '
+            '<a class="quest-jump" href="#daimon-grove">see stats ↓</a>'
             '<span class="quest-note">No XP for accepting the mission; XP unlocks only after a later report verifies the improvement.</span></p>'
-            '<a class="quest-jump" href="#daimon-grove">See your stats →</a>'
             '</section>'
         )
     else:
@@ -815,8 +814,8 @@ def _gamify_blocks(payload: dict, m: dict):
             '<section class="quest quest-empty card">'
             '<div class="quest-tag">Mission board</div>'
             '<h2 class="quest-title">No mission this run</h2>'
-            '<p class="quest-why">No strong evidence-backed mission appeared in this report. Missions appear when one habit clearly needs work.</p>'
-            '<a class="quest-jump" href="#daimon-grove">See your stats →</a>'
+            '<p class="quest-why">No strong evidence-backed mission appeared in this report. '
+            '<a class="quest-jump" href="#daimon-grove">see stats ↓</a></p>'
             '</section>'
         )
 
