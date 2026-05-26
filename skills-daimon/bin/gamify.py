@@ -114,6 +114,7 @@ BADGE_ORDER = (
     "safe_hands",        # no risky git for 3 distinct windows
     "pathfinder",        # planning friction down across 3 distinct days
     "tool_adept",        # built-in tools usage exceeds shell file probing
+    "balanced_grove",    # every track is ≥ Level 2 — see "constellation lights up"
 )
 
 BADGE_NAMES = {
@@ -123,6 +124,7 @@ BADGE_NAMES = {
     "safe_hands":      "Safe Hands",
     "pathfinder":      "Pathfinder",
     "tool_adept":      "Tool Adept",
+    "balanced_grove":  "Balanced Grove",
 }
 
 # Fixed template strings (privacy: no user content interpolates here other
@@ -851,6 +853,17 @@ def build_game_state(
 
     # Badges (state + numeric mask for history).
     badges = _badge_state(ev, history_snapshots, today)
+    # Balanced Grove — every track ≥ Level 2. Computed here because it depends
+    # on the per-track levels, which are only known after deltas + XP roll-up.
+    min_track_level = min(int(t.get("level") or 0) for t in tracks_out.values())
+    badges.append({
+        "id": "balanced_grove",
+        "name": BADGE_NAMES["balanced_grove"],
+        "earned": min_track_level >= 2,
+        "evidence": ("Every track is at Level 2 or higher — the grove's night sky lights up."
+                     if min_track_level >= 2
+                     else f"Weakest track is at Level {min_track_level}; balance unlocks at L2 across all six."),
+    })
     badges_mask = _badges_mask(badges)
     badge_count = sum(1 for b in badges if b["earned"])
 
@@ -862,8 +875,14 @@ def build_game_state(
         "planning_path_level": tracks_out["planning"]["level"],
         "tool_shrine_level":   tracks_out["tool_fluency"]["level"],
         "repo_signpost_level": tracks_out["project_hygiene"]["level"],
+        # The night sky payoff. Stars fade in per track that reaches Level 2;
+        # when EVERY track is ≥ L2, the sky fully lights up (Balanced Grove).
+        "tracks_at_l2_or_more": sum(
+            1 for t in tracks_out.values() if int(t.get("level") or 0) >= 2
+        ),
+        "balanced": min_track_level >= 2,
         # A constellation lights up once trends are real (≥3 distinct days
-        # of numeric history).
+        # of numeric history). Kept for back-compat with the old field name.
         "constellation_unlocked": (history_snapshots is not None and
                                     len({s.get("date") for s in history_snapshots}) >= 3),
     }
@@ -939,140 +958,451 @@ def numeric_game_history_snapshot(game_state: dict) -> dict:
 
 
 # ─── deterministic inline SVG (privacy-safe, no external assets) ────────────
-def render_grove_svg(grove: dict, *, width: int = 900, height: int = 320) -> str:
-    """Return a self-contained inline SVG realm map of the Daimon Grove.
+def render_grove_svg(grove: dict, *, width: int = 900, height: int = 280) -> str:
+    """Return a self-contained inline SVG village-plot view of the Daimon Grove.
 
-    Six sites are connected by a deterministic trail. No external images, no
-    JS. Includes <title>/<desc> for accessibility.
+    Six sites share a single landscape — no path between them. Each site's glyph
+    encodes its level (tree foliage, well fill, thorns count, stepping-stone count,
+    shrine columns, signpost arms). When every track reaches Level 2, the sky
+    transitions to evening and a soft constellation lights up overhead.
     """
     g = grove or {}
     items = [
-        ("Command Tree",   _safe_int(g.get("command_tree_level")),  "tree",   120, 220),
-        ("Memory Well",    _safe_int(g.get("memory_well_level")),   "well",   260, 126),
-        ("Git Thorns",     _safe_int(g.get("git_thorn_level")),     "thorns", 420, 216),
-        ("Planning Path",  _safe_int(g.get("planning_path_level")), "path",   560, 116),
-        ("Tool Shrine",    _safe_int(g.get("tool_shrine_level")),   "shrine", 708, 208),
-        ("Repo Signpost",  _safe_int(g.get("repo_signpost_level")), "post",   810, 116),
+        ("Command Tree",  _safe_int(g.get("command_tree_level")),  "tree",    90),
+        ("Memory Well",   _safe_int(g.get("memory_well_level")),   "well",   235),
+        ("Git Thorns",    _safe_int(g.get("git_thorn_level")),     "thorns", 380),
+        ("Planning Path", _safe_int(g.get("planning_path_level")), "path",   525),
+        ("Tool Shrine",   _safe_int(g.get("tool_shrine_level")),   "shrine", 670),
+        ("Repo Signpost", _safe_int(g.get("repo_signpost_level")), "post",   815),
     ]
-    constellation = bool(g.get("constellation_unlocked"))
-    site_fill = "#FFF7ED"
-    site_stroke = "#B08968"
-    ink = "#3F3A34"
-    muted = "#6B7280"
+    # Vertical anchors (height=280). Ground band ~y180–y280, glyphs ~y130–y215.
+    GROUND_Y = 215   # shadow baseline (also approx bottom of glyphs)
+    LABEL_Y  = 240
+    SUB_Y    = 256
+
+    tracks_lit = max(0, min(6, _safe_int(g.get("tracks_at_l2_or_more"))))
+    balanced = bool(g.get("balanced"))
+    # night blend: 0.0 = full day, 1.0 = full night (only when balanced)
+    night = 1.0 if balanced else 0.0
+
+    # Text + accent palette flips for night so labels stay readable on dark sky.
+    if balanced:
+        ink = "#FEF3C7"     # warm cream — high contrast on indigo
+        muted = "#CBBFA0"
+        red = "#FCA5A5"     # bright red for "needs clearing"
+    else:
+        ink = "#2F271F"
+        muted = "#4B5563"
+        red = "#B42318"
     purple = "#6D28D9"
     green = "#0F766E"
     amber = "#B45309"
-    red = "#B42318"
     blue = "#2563EB"
+    site_stroke = "#B08968"
 
-    def _label(x, y, name, level):
+    def _label(cx, name, level, sub, *, warn=False):
+        sub_fill = red if warn else muted
+        sub_weight = ' font-weight="700"' if warn else ''
         return (
-            f'<text x="{x}" y="{y+58}" text-anchor="middle" '
-            f'font-size="13" font-weight="700" fill="{ink}" font-family="-apple-system,sans-serif">'
-            f'{name}</text>'
-            f'<text x="{x}" y="{y+75}" text-anchor="middle" '
-            f'font-size="11" fill="{muted}" font-family="-apple-system,sans-serif">'
-            f'Level {level}</text>'
+            f'<text x="{cx}" y="{LABEL_Y}" text-anchor="middle" font-size="13" font-weight="700" '
+            f'fill="{ink}" font-family="-apple-system,sans-serif">{name}</text>'
+            f'<text x="{cx}" y="{SUB_Y}" text-anchor="middle" font-size="11" fill="{sub_fill}"{sub_weight} '
+            f'font-family="-apple-system,sans-serif">Level {level} · {sub}</text>'
         )
 
-    def _site(cx, cy, lvl, body):
-        ring = 28 + min(max(lvl - 1, 0), 5) * 2
-        return (
-            f'<circle cx="{cx}" cy="{cy}" r="{ring + 8}" fill="#FDECC8" opacity="0.85"/>'
-            f'<circle cx="{cx}" cy="{cy}" r="{ring}" fill="{site_fill}" stroke="{site_stroke}" stroke-width="3"/>'
-            f'<circle cx="{cx}" cy="{cy}" r="{ring - 7}" fill="none" stroke="#FCD34D" stroke-width="2" stroke-dasharray="3 7"/>'
-            f'{body}'
-        )
+    def _shadow(cx, rx):
+        return f'<ellipse cx="{cx}" cy="{GROUND_Y}" rx="{rx}" ry="6" fill="#000" opacity="0.10"/>'
 
     glyphs = []
-    for name, lvl, kind, cx, cy in items:
+    for name, lvl, kind, cx in items:
         a = max(1, min(6, lvl))
         if kind == "tree":
-            body = (
-                f'<rect x="{cx-4}" y="{cy-2}" width="8" height="30" rx="2" fill="#7C4A28"/>'
-                f'<circle cx="{cx}" cy="{cy-18}" r="{16+a}" fill="{green}" opacity="0.95"/>'
-                f'<circle cx="{cx-14}" cy="{cy-8}" r="{11+a}" fill="#10B981" opacity="0.88"/>'
-                f'<circle cx="{cx+14}" cy="{cy-8}" r="{11+a}" fill="#047857" opacity="0.88"/>'
-            )
-        elif kind == "well":
-            fill_h = 8 + a * 2
-            body = (
-                f'<ellipse cx="{cx}" cy="{cy+4}" rx="22" ry="11" fill="#A7F3D0" stroke="{blue}" stroke-width="3"/>'
-                f'<rect x="{cx-22}" y="{cy-10}" width="44" height="22" fill="#FDE68A" stroke="{site_stroke}" stroke-width="2"/>'
-                f'<rect x="{cx-18}" y="{cy+11-fill_h}" width="36" height="{fill_h}" fill="#60A5FA" opacity="0.72"/>'
-                f'<path d="M {cx-24} {cy-10} Q {cx} {cy-34} {cx+24} {cy-10}" fill="none" stroke="{site_stroke}" stroke-width="3"/>'
-            )
-        elif kind == "thorns":
-            thorns = max(1, 7 - a)
-            bits = []
-            for k in range(thorns):
-                px = cx - 24 + k * 8
-                bits.append(
-                    f'<path d="M {px} {cy+18} L {px+4} {cy-12} L {px+8} {cy+18} Z" fill="{red}" opacity="0.9"/>'
+            # L0 sprout → L6 large tree. Trunk + crown scale dramatically by level.
+            if lvl <= 0:
+                # tiny two-leaf sprout poking out of soil
+                body = (
+                    _shadow(cx, 14)
+                    + f'<rect x="{cx-1}" y="{GROUND_Y-10}" width="2" height="10" fill="#7C4A28"/>'
+                    + f'<ellipse cx="{cx-4}" cy="{GROUND_Y-10}" rx="4" ry="2.5" fill="#10B981"/>'
+                    + f'<ellipse cx="{cx+4}" cy="{GROUND_Y-10}" rx="4" ry="2.5" fill="#047857"/>'
                 )
-            body = "".join(bits) + (
-                f'<path d="M {cx-32} {cy+20} C {cx-10} {cy+6}, {cx+10} {cy+6}, {cx+32} {cy+20}" '
+                sub = "no growth yet"
+            else:
+                trunk_w = 4 + lvl  # widens with level
+                trunk_h = 10 + lvl * 9          # L1=19 … L6=64
+                crown_r = 4 + lvl * 4           # L1=8  … L6=28
+                trunk_top = GROUND_Y - trunk_h
+                crown_cy = trunk_top - crown_r // 2 + 2
+                extras = ""
+                if lvl >= 4:
+                    extras = (
+                        f'<circle cx="{cx-crown_r+2}" cy="{crown_cy-crown_r//2}" r="{crown_r-6}" fill="#10B981" opacity="0.92"/>'
+                        f'<circle cx="{cx+crown_r-2}" cy="{crown_cy-crown_r//2}" r="{crown_r-6}" fill="#047857" opacity="0.92"/>'
+                    )
+                body = (
+                    _shadow(cx, 18 + lvl * 5)
+                    + f'<rect x="{cx-trunk_w//2}" y="{trunk_top}" width="{trunk_w}" height="{trunk_h}" rx="2" fill="#7C4A28"/>'
+                    + f'<circle cx="{cx}" cy="{crown_cy}" r="{crown_r}" fill="{green}"/>'
+                    + f'<circle cx="{cx-crown_r+4}" cy="{crown_cy+crown_r//2}" r="{max(3, crown_r-4)}" fill="#10B981"/>'
+                    + f'<circle cx="{cx+crown_r-4}" cy="{crown_cy+crown_r//2}" r="{max(3, crown_r-4)}" fill="#047857"/>'
+                    + extras
+                )
+                sub = ("sapling" if lvl == 1 else
+                       "small tree" if lvl == 2 else
+                       "young tree" if lvl == 3 else
+                       "mature tree" if lvl == 4 else
+                       "tall tree" if lvl == 5 else
+                       "ancient tree")
+            label = _label(cx, name, lvl, sub)
+        elif kind == "well":
+            # Classic stone wishing well. Stone rim + water surface always
+            # visible at L1+. Posts → roof → bucket → glow grow in by level.
+            stone_dark = "#7A6E5C"
+            stone_mid = "#A89A85"
+            stone_light = "#C6B89E"
+            wood = "#6B4423"
+            roof_col = "#8B4513"
+            water_mid = "#3B82F6"
+            water_hl = "#93C5FD"
+
+            rim_cy = GROUND_Y - 8
+            rim_rx = 22
+            rim_ry = 7
+            wall_h = 14
+
+            if lvl <= 0:
+                # Dry pit. Dark hole in the ground, no walls.
+                body = (
+                    _shadow(cx, 28)
+                    + f'<ellipse cx="{cx}" cy="{GROUND_Y-6}" rx="22" ry="7" fill="#2A2218"/>'
+                    + f'<ellipse cx="{cx}" cy="{GROUND_Y-8}" rx="20" ry="5" fill="#1A1410"/>'
+                )
+                sub = "dry pit"
+            else:
+                wall_top_y = rim_cy
+                wall_bot_y = rim_cy + wall_h
+                wall = (
+                    f'<path d="M {cx-rim_rx} {wall_top_y} '
+                    f'A {rim_rx} {rim_ry} 0 0 0 {cx+rim_rx} {wall_top_y} '
+                    f'L {cx+rim_rx} {wall_bot_y} '
+                    f'A {rim_rx} {rim_ry-1} 0 0 1 {cx-rim_rx} {wall_bot_y} Z" '
+                    f'fill="{stone_mid}"/>'
+                )
+                brick_lines = (
+                    f'<line x1="{cx-rim_rx+3}" y1="{wall_top_y+5}" x2="{cx-2}" y2="{wall_top_y+6}" stroke="{stone_dark}" stroke-width="1" opacity="0.55"/>'
+                    f'<line x1="{cx+3}" y1="{wall_top_y+6}" x2="{cx+rim_rx-3}" y2="{wall_top_y+5}" stroke="{stone_dark}" stroke-width="1" opacity="0.55"/>'
+                    f'<line x1="{cx-2}" y1="{wall_top_y+6}" x2="{cx-2}" y2="{wall_bot_y-2}" stroke="{stone_dark}" stroke-width="1" opacity="0.5"/>'
+                    f'<line x1="{cx-rim_rx+6}" y1="{wall_top_y+10}" x2="{cx-rim_rx+10}" y2="{wall_bot_y-1}" stroke="{stone_dark}" stroke-width="1" opacity="0.5"/>'
+                    f'<line x1="{cx+rim_rx-10}" y1="{wall_top_y+10}" x2="{cx+rim_rx-6}" y2="{wall_bot_y-1}" stroke="{stone_dark}" stroke-width="1" opacity="0.5"/>'
+                )
+                rim = (
+                    f'<ellipse cx="{cx}" cy="{rim_cy}" rx="{rim_rx}" ry="{rim_ry}" '
+                    f'fill="{stone_light}" stroke="{stone_dark}" stroke-width="1"/>'
+                )
+                mouth = (
+                    f'<ellipse cx="{cx}" cy="{rim_cy+1}" rx="{rim_rx-4}" ry="{rim_ry-2}" '
+                    f'fill="#2A2218"/>'
+                )
+                water_ry = max(1, min(rim_ry - 2, 1 + lvl))
+                water = (
+                    f'<ellipse cx="{cx}" cy="{rim_cy+2}" rx="{rim_rx-5}" ry="{water_ry}" '
+                    f'fill="{water_mid}"/>'
+                    f'<ellipse cx="{cx}" cy="{rim_cy+1}" rx="{rim_rx-7}" ry="{max(0.5, water_ry-1.5)}" '
+                    f'fill="{water_hl}" opacity="0.7"/>'
+                ) if lvl >= 1 else ""
+
+                post_top = rim_cy - 30
+                post_l_x = cx - rim_rx + 2
+                post_r_x = cx + rim_rx - 2
+                posts = ""
+                roof = ""
+                bucket = ""
+                glow = ""
+                sparkle = ""
+                if lvl >= 2:
+                    posts = (
+                        f'<rect x="{post_l_x-2}" y="{post_top}" width="4" height="{rim_cy-post_top}" fill="{wood}"/>'
+                        f'<rect x="{post_r_x-2}" y="{post_top}" width="4" height="{rim_cy-post_top}" fill="{wood}"/>'
+                        f'<rect x="{post_l_x-3}" y="{post_top-3}" width="{(post_r_x-post_l_x)+6}" height="4" fill="{wood}"/>'
+                    )
+                if lvl >= 3:
+                    roof_h = 8 + min(lvl, 6) * 2
+                    roof_apex_y = post_top - roof_h - 2
+                    roof_overhang = 6
+                    roof = (
+                        f'<polygon points="'
+                        f'{post_l_x-roof_overhang},{post_top-2} '
+                        f'{post_r_x+roof_overhang},{post_top-2} '
+                        f'{cx},{roof_apex_y}" '
+                        f'fill="{roof_col}"/>'
+                        f'<polygon points="'
+                        f'{post_l_x-roof_overhang},{post_top-2} '
+                        f'{cx},{roof_apex_y} '
+                        f'{cx-2},{post_top-2}" '
+                        f'fill="#A0522D" opacity="0.55"/>'
+                    )
+                if lvl >= 4:
+                    bucket_y = rim_cy - 12
+                    bucket = (
+                        f'<line x1="{cx}" y1="{post_top-1}" x2="{cx}" y2="{bucket_y}" stroke="#3A2A1A" stroke-width="1"/>'
+                        f'<path d="M {cx-5} {bucket_y} L {cx+5} {bucket_y} L {cx+4} {bucket_y+7} L {cx-4} {bucket_y+7} Z" fill="#5C3A1E"/>'
+                        f'<rect x="{cx-5}" y="{bucket_y}" width="10" height="2" fill="#3A2A1A"/>'
+                    )
+                if lvl >= 5:
+                    glow = (
+                        f'<ellipse cx="{cx}" cy="{rim_cy+1}" rx="{rim_rx+4}" ry="{rim_ry+2}" '
+                        f'fill="#FCD34D" opacity="0.18"/>'
+                    )
+                if lvl >= 6:
+                    sparkle = (
+                        f'<circle cx="{cx-8}" cy="{rim_cy-2}" r="1.2" fill="#FEF3C7"/>'
+                        f'<circle cx="{cx+6}" cy="{rim_cy}" r="1.5" fill="#FEF3C7"/>'
+                    )
+
+                body = (
+                    _shadow(cx, 32)
+                    + wall + brick_lines + rim + mouth
+                    + glow + water + sparkle
+                    + posts + roof + bucket
+                )
+                sub = ("damp stone" if lvl == 1 else
+                       "shallow water" if lvl == 2 else
+                       "half-full" if lvl == 3 else
+                       "drawing water" if lvl == 4 else
+                       "deep well" if lvl == 5 else
+                       "brimming well")
+            label = _label(cx, name, lvl, sub)
+        elif kind == "thorns":
+            # MORE thorns = LOWER level (track of friction). High level = cleared.
+            thorns_n = max(1, 7 - a)
+            bits = []
+            spacing = 8
+            start = cx - (thorns_n - 1) * spacing // 2
+            base_y = GROUND_Y - 2
+            tip_y = base_y - 28
+            for k in range(thorns_n):
+                px = start + k * spacing
+                bits.append(f'<path d="M {px-3} {base_y} L {px} {tip_y} L {px+3} {base_y} Z" fill="{red}" opacity="0.9"/>')
+            body = (
+                _shadow(cx, 40)
+                + "".join(bits)
+                + f'<path d="M {cx-30} {GROUND_Y+2} C {cx-10} {GROUND_Y-14}, {cx+10} {GROUND_Y-14}, {cx+30} {GROUND_Y+2}" '
                 f'fill="none" stroke="#7F1D1D" stroke-width="3"/>'
             )
+            warn = lvl <= 2
+            sub = "needs clearing" if warn else ("thinning" if lvl <= 4 else "cleared")
+            label = _label(cx, name, lvl, sub, warn=warn)
         elif kind == "path":
-            stones = []
-            for k in range(5):
-                stones.append(
-                    f'<ellipse cx="{cx-28+k*14}" cy="{cy+8-(k%2)*8}" rx="{5+a*0.4:.1f}" ry="4" fill="{purple}" opacity="0.9"/>'
-                )
-            body = "".join(stones) + (
-                f'<path d="M {cx-34} {cy+24} C {cx-6} {cy-24}, {cx+12} {cy-20}, {cx+34} {cy+20}" '
-                f'fill="none" stroke="{purple}" stroke-width="3" stroke-dasharray="5 5"/>'
-            )
+            # stones laid: more stones = higher level
+            stones_n = max(2, min(6, 1 + a))
+            bits = []
+            span = 60
+            for k in range(stones_n):
+                px = cx - span // 2 + int(k * span / max(1, stones_n - 1))
+                py = (GROUND_Y - 8) + ((k % 2) * 2)
+                bits.append(f'<ellipse cx="{px}" cy="{py}" rx="6" ry="3" fill="#7C4A28"/>')
+            body = _shadow(cx, 44) + "".join(bits)
+            sub = "stepping stones" if lvl <= 3 else "laid path"
+            label = _label(cx, name, lvl, sub)
         elif kind == "shrine":
-            body = (
-                f'<rect x="{cx-28}" y="{cy+15}" width="56" height="7" rx="2" fill="{purple}"/>'
-                f'<rect x="{cx-22}" y="{cy-8}" width="7" height="24" fill="{purple}"/>'
-                f'<rect x="{cx-4}" y="{cy-8}" width="8" height="24" fill="{purple}" opacity="0.9"/>'
-                f'<rect x="{cx+15}" y="{cy-8}" width="7" height="24" fill="{purple}"/>'
-                f'<polygon points="{cx-34},{cy-8} {cx+34},{cy-8} {cx},{cy-28}" fill="{purple}"/>'
-                f'<circle cx="{cx}" cy="{cy-38}" r="{4+a}" fill="#FCD34D"/>'
+            if lvl <= 0:
+                # bare plot: just a stone slab on the ground.
+                body = (
+                    _shadow(cx, 30)
+                    + f'<rect x="{cx-22}" y="{GROUND_Y-6}" width="44" height="6" rx="1" fill="#8C7A5C"/>'
+                    + f'<rect x="{cx-16}" y="{GROUND_Y-9}" width="4" height="3" fill="#7C6A4E"/>'
+                    + f'<rect x="{cx+10}" y="{GROUND_Y-9}" width="4" height="3" fill="#7C6A4E"/>'
+                )
+                sub = "bare plot"
+            else:
+                # cols: L1=1 single stake → L6=6 full shrine
+                cols = lvl
+                col_w = 7
+                inner_span = min(54, 8 + cols * 8)
+                col_h = 22 + lvl * 2
+                base_y = GROUND_Y - 6
+                col_top = base_y - col_h
+                roof_y = col_top - 2
+                apex_y = roof_y - (10 + min(lvl, 4) * 2)
+                star_y = apex_y - 8
+                col_xs = (
+                    [cx - inner_span // 2 + int(k * inner_span / (cols - 1)) for k in range(cols)]
+                    if cols > 1 else [cx]
+                )
+                col_bits = "".join(
+                    f'<rect x="{x - col_w//2}" y="{col_top}" width="{col_w}" height="{col_h}" fill="{purple}"/>'
+                    for x in col_xs
+                )
+                base_w = max(18, inner_span + 14)
+                roof_w = max(20, inner_span + 18)
+                roof_extra = ""
+                if lvl >= 1:
+                    roof_extra = (
+                        f'<rect x="{cx-base_w//2}" y="{base_y}" width="{base_w}" height="6" fill="{purple}"/>'
+                        + f'<polygon points="{cx-roof_w//2},{roof_y} {cx+roof_w//2},{roof_y} {cx},{apex_y}" fill="{purple}"/>'
+                    )
+                capstone = (
+                    f'<circle cx="{cx}" cy="{star_y}" r="{2+min(lvl, 5)}" fill="#FCD34D"/>'
+                    if lvl >= 2 else ""
+                )
+                body = (
+                    _shadow(cx, 30 + lvl * 3)
+                    + roof_extra
+                    + col_bits
+                    + capstone
+                )
+                sub = ("single stake" if lvl == 1 else
+                       "two pillars" if lvl == 2 else
+                       "colonnade" if lvl == 3 else
+                       "small shrine" if lvl == 4 else
+                       "full shrine" if lvl == 5 else
+                       "golden shrine")
+            label = _label(cx, name, lvl, sub)
+        else:  # post / signpost
+            if lvl <= 0:
+                body = (
+                    _shadow(cx, 12)
+                    + f'<rect x="{cx-2}" y="{GROUND_Y-14}" width="4" height="14" rx="1" fill="#7C4A28"/>'
+                )
+                sub = "bare stake"
+            else:
+                arms = max(1, min(6, lvl))
+                post_h = 28 + arms * 5     # L1=33 … L6=58
+                post_top = GROUND_Y - post_h
+                arm_gap = 8
+                arm_w = 8
+                arm_zone_h = (arms - 1) * arm_gap + arm_w
+                arm_top = post_top + max(0, (post_h - arm_zone_h - 4) // 2) + 2
+                bits = []
+                # widest arm at top, tapering as we go down (signpost silhouette)
+                widths = [30, 28, 26, 24, 22, 20][:arms]
+                for k in range(arms):
+                    ay = arm_top + k * arm_gap
+                    w = widths[k]
+                    if k % 2 == 0:
+                        bits.append(
+                            f'<path d="M {cx-w} {ay} H {cx+w-4} L {cx+w-12} {ay+arm_w} H {cx-w} Z" '
+                            f'fill="{amber}"/>'
+                        )
+                    else:
+                        bits.append(
+                            f'<path d="M {cx+w} {ay} H {cx-w+4} L {cx-w+12} {ay+arm_w} H {cx+w} Z" '
+                            f'fill="#F59E0B"/>'
+                        )
+                body = (
+                    _shadow(cx, 20)
+                    + f'<rect x="{cx-4}" y="{post_top}" width="8" height="{post_h}" rx="2" fill="#7C4A28"/>'
+                    + "".join(bits)
+                )
+                sub = ("lone post" if lvl == 1 else
+                       "one direction" if lvl == 2 else
+                       "signposted" if lvl == 3 else
+                       "well-marked" if lvl == 4 else
+                       "crossroads" if lvl == 5 else
+                       "waymarker hub")
+            label = _label(cx, name, lvl, sub)
+
+        glyphs.append(f'<g><title>{name} — level {lvl}</title>{body}{label}</g>')
+
+    # Stars: one per track that hit L>=2, fade-in by count. Full constellation only when balanced.
+    star_positions = [
+        (110, 60), (220, 42), (340, 70), (460, 38),
+        (560, 62), (640, 44), (740, 70), (160, 96), (620, 100),
+    ]
+    star_bits = []
+    star_count = max(0, tracks_lit)
+    # Day-mode = small amber sparkles (visible against cream sky).
+    # Night-mode = soft pale-yellow stars + 4-point glints.
+    for k, (sx, sy) in enumerate(star_positions[:star_count]):
+        r = 2.0 + (k % 3) * 0.6
+        if balanced:
+            star_bits.append(
+                f'<circle cx="{sx}" cy="{sy}" r="{r:.1f}" fill="#FDE68A" opacity="0.95"/>'
+                f'<path d="M {sx} {sy-r-2} L {sx+1} {sy} L {sx} {sy+r+2} L {sx-1} {sy} Z" '
+                f'fill="#FFFFFF" opacity="0.85"/>'
+                f'<path d="M {sx-r-2} {sy} L {sx} {sy+1} L {sx+r+2} {sy} L {sx} {sy-1} Z" '
+                f'fill="#FFFFFF" opacity="0.85"/>'
             )
         else:
-            body = (
-                f'<rect x="{cx-4}" y="{cy-24}" width="8" height="50" rx="3" fill="#7C4A28"/>'
-                f'<path d="M {cx-32} {cy-20} H {cx+28} L {cx+18} {cy-8} H {cx-32} Z" fill="{amber}"/>'
-                f'<path d="M {cx+30} {cy+2} H {cx-28} L {cx-18} {cy+14} H {cx+30} Z" fill="#F59E0B"/>'
+            # 4-point amber spark — readable on the day sky.
+            star_bits.append(
+                f'<g opacity="0.9"><circle cx="{sx}" cy="{sy}" r="{r-0.4:.1f}" fill="#F59E0B"/>'
+                f'<path d="M {sx} {sy-r-3} L {sx+1.2} {sy} L {sx} {sy+r+3} L {sx-1.2} {sy} Z" '
+                f'fill="#F59E0B"/>'
+                f'<path d="M {sx-r-3} {sy} L {sx} {sy+1.2} L {sx+r+3} {sy} L {sx} {sy-1.2} Z" '
+                f'fill="#F59E0B"/></g>'
             )
-        glyphs.append(_site(cx, cy, lvl, body))
-        # accessibility: per-glyph title for hover/AT
-        glyphs.append(f'<title>{name} — level {lvl}</title>')
-        glyphs.append(_label(cx, cy, name, lvl))
 
-    # Constellation: small stars across the top when unlocked
-    if constellation:
-        stars = []
-        for k, x in enumerate((124, 212, 326, 496, 646, 760, 832)):
-            stars.append(
-                f'<path d="M {x} 38 l4 9 10 1 -8 6 2 10 -8-5 -8 5 2-10 -8-6 10-1 Z" '
-                f'fill="#FCD34D" stroke="#B45309" stroke-width="1" opacity="{0.75 + (k%2)*0.15}"/>'
-            )
+    # Sky: day gradient unless balanced (then evening). Soft clouds fade out at night.
+    sun_x, sun_y = 770, 56
+    # Suffix gradient IDs by palette so multiple grove SVGs on one page
+    # (e.g. the level-showcase) don't collide on the global ID namespace.
+    palette_id = "night" if balanced else "day"
+    sky_id = f"grove_sky_{palette_id}"
+    ground_id = f"grove_ground_{palette_id}"
+    if balanced:
+        # Real night. Sky AND ground darken so contrast reads as evening,
+        # not "blue tint over daytime".
+        sky_top, sky_bot = "#0B0922", "#231640"
+        ground_top, ground_bot = "#2E5C3A", "#1F4029"
+        ground_strip = "#173026"
+        cloud_op = 0.08
+        sun_disc = (
+            f'<circle cx="{sun_x}" cy="{sun_y}" r="22" fill="#FEF3C7" opacity="0.30"/>'
+            f'<circle cx="{sun_x}" cy="{sun_y}" r="16" fill="#FEF3C7" opacity="0.98"/>'
+            f'<circle cx="{sun_x-5}" cy="{sun_y-3}" r="3" fill="#E5D08C" opacity="0.85"/>'
+            f'<circle cx="{sun_x+4}" cy="{sun_y+5}" r="2" fill="#E5D08C" opacity="0.8"/>'
+            f'<circle cx="{sun_x+2}" cy="{sun_y-6}" r="1.6" fill="#E5D08C" opacity="0.75"/>'
+        )
     else:
-        stars = []
+        sky_top, sky_bot = "#FDECC8", "#FFF8E7"
+        ground_top, ground_bot = "#D9F0C3", "#A7D58D"
+        ground_strip = "#7FB269"
+        cloud_op = 0.7
+        sun_disc = (
+            f'<circle cx="{sun_x}" cy="{sun_y}" r="26" fill="#FCD34D" opacity="0.18"/>'
+            f'<circle cx="{sun_x}" cy="{sun_y}" r="18" fill="#FCD34D" opacity="0.95"/>'
+        )
+
+    title_line = "Daimon Grove · The Plot"
+    sub_line = (
+        "Every site at Level 2 or higher — night sky lit." if balanced
+        else f"{tracks_lit} of 6 sites at L2+. Sky turns to night when all six clear L2."
+    )
 
     return (
         f'<svg viewBox="0 0 {width} {height}" width="100%" preserveAspectRatio="xMinYMin meet" '
-        f'role="img" aria-label="Daimon Grove adventure map">'
+        f'role="img" aria-label="Daimon Grove village plot">'
         f'<title>Daimon Grove</title>'
-        f'<desc>RPG-style adventure map with six craft sites: Command Tree, Memory Well, Git Thorns, '
-        f'Planning Path, Tool Shrine, and Repo Signpost. Site level follows verified evidence.</desc>'
-        f'<rect x="0" y="0" width="{width}" height="{height}" rx="22" fill="#FFF8E7"/>'
-        f'<path d="M 0 255 C 130 225, 190 286, 330 248 S 590 224, 900 258 V 320 H 0 Z" fill="#E7F6DC"/>'
-        f'<path d="M 0 64 C 106 38, 214 54, 318 34 S 504 52, 630 34 S 786 48, 900 28 V 0 H 0 Z" fill="#FDECC8"/>'
-        f'<path d="M 38 280 C 136 230, 192 172, 260 126 S 352 146, 420 216 S 500 165, 560 116 '
-        f'S 650 162, 708 208 S 770 158, 810 116" fill="none" stroke="#C08457" stroke-width="13" '
-        f'stroke-linecap="round" opacity="0.35"/>'
-        f'<path d="M 38 280 C 136 230, 192 172, 260 126 S 352 146, 420 216 S 500 165, 560 116 '
-        f'S 650 162, 708 208 S 770 158, 810 116" fill="none" stroke="#7C4A28" stroke-width="3" '
-        f'stroke-linecap="round" stroke-dasharray="8 10" opacity="0.55"/>'
-        f'<text x="34" y="38" font-size="18" font-weight="800" fill="{ink}" font-family="-apple-system,sans-serif">Daimon Grove Adventure Map</text>'
-        f'<text x="34" y="58" font-size="12" fill="{muted}" font-family="-apple-system,sans-serif">Each landmark is a habit area. It changes only when evidence proves improvement.</text>'
-        + "".join(stars)
+        f'<desc>Village-plot view of the Daimon Grove with six craft sites — Command Tree, Memory Well, '
+        f'Git Thorns, Planning Path, Tool Shrine, and Repo Signpost — sharing one landscape. No path '
+        f'connects them; each grows in parallel as evidence proves improvement. When every site reaches '
+        f'Level 2, the sky turns to evening and a constellation appears.</desc>'
+        f'<defs>'
+        f'<linearGradient id="{sky_id}" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0%" stop-color="{sky_top}"/>'
+        f'<stop offset="100%" stop-color="{sky_bot}"/>'
+        f'</linearGradient>'
+        f'<linearGradient id="{ground_id}" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0%" stop-color="{ground_top}"/>'
+        f'<stop offset="100%" stop-color="{ground_bot}"/>'
+        f'</linearGradient>'
+        f'</defs>'
+        f'<rect x="0" y="0" width="{width}" height="{height}" rx="14" fill="url(#{sky_id})"/>'
+        # rolling hills, no road
+        f'<path d="M 0 200 C 120 168, 230 222, 360 198 S 600 174, 780 206 S 900 188, 900 216 V {height} H 0 Z" fill="url(#{ground_id})"/>'
+        f'<path d="M 0 224 C 200 208, 380 246, 540 224 S 800 232, 900 244 V {height} H 0 Z" fill="{ground_strip}" opacity="0.6"/>'
+        # clouds (fade out at night)
+        f'<g fill="#FFFFFF" opacity="{cloud_op}">'
+        f'<ellipse cx="140" cy="52" rx="32" ry="9"/>'
+        f'<ellipse cx="170" cy="48" rx="20" ry="7"/>'
+        f'<ellipse cx="560" cy="44" rx="36" ry="10"/>'
+        f'<ellipse cx="600" cy="38" rx="20" ry="7"/>'
+        f'</g>'
+        + sun_disc
+        + "".join(star_bits)
+        + f'<text x="22" y="26" font-size="14" font-weight="800" fill="{ink}" font-family="-apple-system,sans-serif">{title_line}</text>'
+        f'<text x="22" y="42" font-size="11" fill="{muted}" font-family="-apple-system,sans-serif">{sub_line}</text>'
         + "".join(glyphs)
         + '</svg>'
     )

@@ -286,6 +286,49 @@ class TestGroveSvg(unittest.TestCase):
                       "Planning Path", "Tool Shrine", "Repo Signpost"):
             self.assertIn(label, svg)
 
+    def test_no_path_geometry_between_sites(self):
+        # Village plot must not encode a sequential trail. Old design used
+        # a dashed cubic stroke connecting all six sites; that must be gone.
+        s = build_game_state(SAMPLE_PAYLOAD, _history(), today="2026-05-25")
+        svg = render_grove_svg(s["grove"])
+        # No stroke-dasharray on any decorative path (used by old trail).
+        self.assertNotIn("stroke-dasharray=\"8 10\"", svg)
+        self.assertNotIn("stroke-dasharray=\"5 5\"", svg)
+        # Aria-label should describe a plot/village, not a map/path.
+        self.assertIn("village", svg.lower())
+
+    def test_unbalanced_grove_shows_day_sky_no_full_constellation(self):
+        # SAMPLE_PAYLOAD fixture is unbalanced (Git Thorns ≤ L2 etc.).
+        s = build_game_state(SAMPLE_PAYLOAD, _history(), today="2026-05-25")
+        self.assertFalse(s["grove"]["balanced"])
+        svg = render_grove_svg(s["grove"])
+        # Day-mode gradient stops.
+        self.assertIn("#FDECC8", svg)
+        # No evening palette.
+        self.assertNotIn("#0B0922", svg)
+
+    def test_balanced_grove_lights_up_night_sky(self):
+        # Synthetic grove dict with every track ≥ L2 → balanced.
+        grove = {
+            "level": 5,
+            "command_tree_level": 3,
+            "memory_well_level": 2,
+            "git_thorn_level": 2,
+            "planning_path_level": 4,
+            "tool_shrine_level": 2,
+            "repo_signpost_level": 2,
+            "tracks_at_l2_or_more": 6,
+            "balanced": True,
+            "constellation_unlocked": True,
+        }
+        svg = render_grove_svg(grove)
+        # Evening sky.
+        self.assertIn("#0B0922", svg)
+        # At least one star drawn (the constellation lit up).
+        self.assertIn('fill="#FDE68A"', svg)
+        # Sub-line copy mentions the night sky payoff.
+        self.assertIn("night sky", svg.lower())
+
 
 class TestBadgesAndConstellation(unittest.TestCase):
     def test_constellation_locks_below_three_distinct_days(self):
@@ -461,7 +504,7 @@ class TestDisplayPolish(unittest.TestCase):
         html = _render_with_history(payload, _history())
         self.assertIn("Daimon Grove · Level", html)
         self.assertIn("RPG habit map", html)
-        self.assertIn("Daimon Grove Adventure Map", html)
+        self.assertIn("Daimon Grove · The Plot", html)
         self.assertIn("Why XP changed (evidence ledger)", html)
         self.assertIn("Landmark", html)
         self.assertIn("Relic", html)
