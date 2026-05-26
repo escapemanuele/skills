@@ -650,13 +650,12 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .daimon-chip .dc-val{font-size:14px;font-weight:800;margin:0 2px}
 .daimon-chip .dc-xp{opacity:.75;font-weight:500}
 @media(max-width:520px){.daimon-chip{position:static;display:inline-flex;margin:0 0 10px}}
-/* quest card */
-.quest{border:1px solid #d7bc92;background:#fff8e7;position:relative}
-.quest:before{content:"Quest Log";position:absolute;top:-11px;left:18px;background:#fff8e7;color:#8A5B21;
-  font-size:11px;text-transform:uppercase;letter-spacing:.8px;font-weight:900;padding:0 8px}
-.quest-tag{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#8A5B21;
-  font-weight:900;margin-bottom:6px}
-.quest-title{margin:0 0 8px;font-size:20px;font-weight:900;color:#2F271F}
+/* quest card — single strong label, no duplicate pseudo-element */
+.quest{border:2px solid #d7bc92;background:#fff8e7;border-left-width:6px;border-left-color:#B45309;position:relative}
+.quest-tag{display:inline-block;background:#B45309;color:#fff;font-size:11px;text-transform:uppercase;
+  letter-spacing:1px;font-weight:900;padding:4px 10px;border-radius:6px;margin-bottom:10px}
+.quest-tag:before{content:"⚔ ";margin-right:2px}
+.quest-title{margin:0 0 8px;font-size:22px;font-weight:900;color:#2F271F}
 .quest-why{margin:6px 0;color:#374151}
 .quest-do{margin:10px 0}
 .quest-do-label{font-size:11px;font-weight:900;color:%(GOOD)s;text-transform:uppercase;letter-spacing:.5px}
@@ -664,8 +663,8 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .quest-reward{margin:10px 0 0;color:#374151;font-size:13.5px;font-weight:700}
 .quest-note{color:%(MUTED)s;font-size:12px}
 .quest-track{display:inline-block;margin:4px 0 8px;font-size:12px;color:%(MUTED)s}
-.quest-empty{background:#fff;border-color:%(GAP)s}
-.quest-empty:before{background:#fff;color:%(MUTED)s}
+.quest-empty{background:#fff;border-color:%(GAP)s;border-left-color:%(MUTED)s}
+.quest-empty .quest-tag{background:%(MUTED)s}
 /* grove */
 .grove-card{padding:0;overflow:hidden;background:#fffdf8;border-color:#e7d6b6}
 .grove-banner{padding:18px 22px 16px;background:#fff4dc;border-bottom:1px solid #ead6b5}
@@ -789,7 +788,7 @@ def _gamify_blocks(payload: dict, m: dict):
     if quest:
         quest_html = (
             '<section class="quest card">'
-            '<div class="quest-tag">Quest Log · Active quest</div>'
+            '<div class="quest-tag">Active quest</div>'
             f'<h2 class="quest-title">{esc(quest.get("title"))}</h2>'
             f'<span class="quest-track">Track: {esc(_gamify.display_track_name(quest.get("track","")))}</span>'
             f'<p class="quest-why">{esc(quest.get("why",""))}</p>'
@@ -801,7 +800,7 @@ def _gamify_blocks(payload: dict, m: dict):
     else:
         quest_html = (
             '<section class="quest quest-empty card">'
-            '<div class="quest-tag">Quest Log</div>'
+            '<div class="quest-tag">Quest</div>'
             '<h2 class="quest-title">No active quest this run</h2>'
             '<p class="quest-why">The report did not find a strong enough evidence-backed opportunity.</p>'
             '</section>'
