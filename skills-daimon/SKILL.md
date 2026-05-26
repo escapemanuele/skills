@@ -239,7 +239,7 @@ Say:
 
 ## ✨ Catalog-backed recommendations
 
-Skills the user can install, drawn only from real catalog hits. **Catalog-verified, never generated.** **Always render the full detail in markdown too — not just in HTML — including the TL;DR table and the numbered cards below.**
+Skills the user can install, drawn only from real catalog hits. **Catalog-verified, never generated.** **Aim for 3 recommendations minimum (cap 5).** **Always render the full detail in markdown too — not just in HTML — including the TL;DR table and the numbered cards below.**
 
 | Type | Name | Matches | Why |
 |---|---|---|---|
@@ -380,7 +380,8 @@ Build coaching points from these signals (skip any that don't clear the threshol
 
 - Lead with evidence. Every recommendation AND every coaching point must cite a count.
 - Mark confidence honestly — *"low"* is fine and trustworthy.
-- No more than 5 recommended skills total. No more than 3 "worth building yourself" entries. No more than 3 coaching points.
+- **Aim for 3 recommendations (minimum); cap at 5.** Recommendations are one of the report's two main focuses, alongside the Primary action — never ship fewer than 3 when the catalogs can support it. If you initially identify only 1–2 strong jobs, widen the job search to the next-best signals (secondary bash verbs, MCP calls, recap focus areas) and run another catalog query, so long as every rec stays catalog-backed and grounded in a real count. If after that **fewer than 3 real catalog hits genuinely exist**, say so plainly: *"Only N catalog-backed recommendations matched your usage; the rest is in 'Worth building yourself.'"* Never pad with weak matches and never invent skills.
+- No more than 3 "worth building yourself" entries. No more than 3 coaching points.
 - **Evidence-bound coaching is in scope** — calling out a habit ("214 raw `grep`/`find`/`cat` calls — the native Grep/Glob/Read tools are faster") is exactly the teacher role, *as long as it cites a count*. What's still out of bounds is **count-free editorializing** ("you should review PRs less often") — opinions with no number behind them.
 
 ## Step 5.5 — Award an archetype (a playful title)
@@ -429,7 +430,8 @@ After the markdown report is written, generate a self-contained visual version a
    - `coaching`: `[{title, evidence, costs, better}]` (keys unchanged; the renderer labels them What we saw / Why it matters / Try this).
    - `work_recap`: pass `work_recap` straight from the scan JSON (drives the "What you've been working on" strip).
    - `scorecard`: `[{label, value, verdict, note, explain, history_key?, current_number?}]` — the **Workflow signals** (see below). `verdict` is one of `good` / `watch` / `needs_action` / `no_data` (legacy aliases `warn` → `watch`, `bad` → `needs_action` are still accepted by the renderer). The renderer colors them green / amber / red / muted. Each row is **expandable** (`<details>`): collapsed shows `label` + `value` + verdict; expanding reveals `note` then `explain`. `explain` = 1–2 plain sentences a non-expert understands. `history_key` (optional) lets the renderer draw a sparkline + delta from `history.jsonl` (Step 7); supply the same key in the snapshot's `scorecard` map and the row's `current_number` (numeric). **Only include signals with a clear better direction.** When data is missing, prefer a `no_data` row with `value: "not enough data"` to leaving the row out silently.
-   - `charts`: context-only bars — `{tool_use_top, bash_verbs_top}` straight from the scan JSON. These render at the bottom under "just for context" with no verdict (raw counts have no good/bad).
+   - `charts`: context-only bars — `{tool_use_top, bash_verbs_top}` straight from the scan JSON. (The renderer no longer surfaces a "Your activity — just for context" section, but these stay in the payload for any caller that wants them.)
+   - **Raw scan pass-through (REQUIRED for gamify)** — copy these scan-JSON blocks **as-is** into the payload so `bin/gamify.py` sees the same evidence: `coaching_signals`, `outcomes`, `memory_events`, `recurring_prompts`, `tool_errors`, `completion`, `stuck_loops`, `installed_skills`. Without them gamify renders "No active quest this run" because every signal reads as zero.
 
    **Building the scorecard.** Score each signal that has a quality axis; skip any with no data. Use these thresholds:
    - **File search (shell vs built-in)** — from `coaching_signals.native_tool_bypass`. `value` = "<pct>% via shell", `note` = "<bypass_total> shell vs <Grep+Glob+Read> built-in". Verdict: `<10%` → `good`, `10–25%` → `watch`, `>25%` → `needs_action`.
@@ -471,7 +473,8 @@ Build a snapshot like:
     "unsaved_prompts": <int>
   },
   "archetype": "<title>",
-  "work_mix": { "dev": <pct>, "writing": <pct>, "data": <pct>, "ops": <pct> }
+  "work_mix": { "dev": <pct>, "writing": <pct>, "data": <pct>, "ops": <pct> },
+  "game": { /* numeric-only gamify snapshot, see below */ }
 }
 ```
 
@@ -482,6 +485,26 @@ python3 ~/.claude/skills/skills-daimon/bin/history.py append < /tmp/skills-daimo
 ```
 
 `(date, window_days)` is the dedupe key — same-day reruns **overwrite** the entry, so the sparkline never shows fake movement.
+
+### The Daimon Grove block (`game`, numeric only)
+
+When gamify is in use, append a `game` sub-object containing **only the numeric snapshot from `gamify.numeric_game_history_snapshot(state)`** — never raw quest titles, badge names, or evidence strings. The history file enforces this (non-numeric values are dropped); follow it in the snapshot you write too.
+
+```bash
+python3 - <<'PY'
+import json, sys, pathlib
+sys.path.insert(0, str(pathlib.Path.home() / ".claude/skills/skills-daimon/bin"))
+import gamify, json
+analysis = json.load(open("/tmp/sd-payload.json"))
+state = gamify.build_game_state(analysis, history_snapshots=None, today="<YYYY-MM-DD>", window_days=28)
+snap = {"date": "<YYYY-MM-DD>", "window_days": 28, "sessions": ..., "labeled": ...,
+        "scorecard": {...}, "archetype": "...", "work_mix": {...},
+        "game": gamify.numeric_game_history_snapshot(state)}
+json.dump(snap, sys.stdout)
+PY
+```
+
+XP is awarded only when the *next* run verifies an improvement vs the prior distinct day; running the report on the same day a second time does not double-award. Weak signals never subtract XP.
 
 ### Stuck-loop coaching (when `stuck_loops` non-empty)
 

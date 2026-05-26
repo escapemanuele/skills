@@ -67,6 +67,17 @@ def esc(s) -> str:
     return html.escape(str(s if s is not None else ""))
 
 
+def safe_metric_text(s) -> str:
+    text = str(s if s is not None else "")
+    if "0% of 0" in text or "0 of 0 sessions" in text:
+        return "Not enough session data to evaluate this area."
+    return text
+
+
+def esc_metric(s) -> str:
+    return esc(safe_metric_text(s))
+
+
 def bar_chart(data: dict, title: str, top: int = 10, color: str = BAR) -> str:
     """Horizontal bar chart as inline SVG from a {label: count} dict."""
     items = sorted(data.items(), key=lambda kv: kv[1], reverse=True)[:top]
@@ -126,8 +137,47 @@ def _fmt_num(v):
     return str(v)
 
 
-def sparkline(values, w=72, h=18) -> str:
-    """Inline-SVG sparkline. Requires ≥3 distinct points or returns empty."""
+# Default direction-of-goodness per known history_key. Higher value = better,
+# or lower value = better. Used to color deltas / sparklines correctly.
+HIGHER_BETTER_KEYS = {"outcome_finished_pct", "memory_rate_pct"}
+LOWER_BETTER_KEYS = {
+    "risky_git_count", "search_shell_pct", "bash_error_pct",
+    "claudemd_missing", "unsaved_prompts",
+}
+
+
+def _direction_for(item: dict) -> str | None:
+    """Return 'higher_better' / 'lower_better' / None for a scorecard item."""
+    d = (item.get("direction") or "").strip().lower()
+    if d in ("higher_better", "lower_better"):
+        return d
+    key = item.get("history_key")
+    if key in HIGHER_BETTER_KEYS:
+        return "higher_better"
+    if key in LOWER_BETTER_KEYS:
+        return "lower_better"
+    return None
+
+
+def _trend_class(current, prior, direction: str | None) -> str:
+    """'good' if movement is in the better direction, 'bad' otherwise, '' if neutral."""
+    if direction is None or current is None or prior is None:
+        return ""
+    try:
+        if current == prior:
+            return ""
+        better = (current > prior) if direction == "higher_better" else (current < prior)
+    except TypeError:
+        return ""
+    return "good" if better else "bad"
+
+
+def sparkline(values, w=72, h=18, trend_class: str = "") -> str:
+    """Inline-SVG sparkline. Requires ≥3 distinct points or returns empty.
+
+    `trend_class` ('good'/'bad'/'') styles the stroke via CSS so the line color
+    reflects whether the metric is heading the right way.
+    """
     if not values or len(values) < 3:
         return ""
     lo, hi = min(values), max(values)
@@ -139,15 +189,17 @@ def sparkline(values, w=72, h=18) -> str:
         y = h - 2 - (v - lo) * (h - 4) / rng
         pts.append(f"{x:.1f},{y:.1f}")
     poly = " ".join(pts)
+    cls = f"sline {trend_class}".strip()
     return (
-        f'<svg class="sline" viewBox="0 0 {w} {h}" width="{w}" height="{h}" '
+        f'<svg class="{cls}" viewBox="0 0 {w} {h}" width="{w}" height="{h}" '
         f'role="img"><polyline fill="none" stroke="currentColor" '
         f'stroke-width="1.5" points="{poly}"/></svg>'
     )
 
 
-def _delta_html(values: list, current) -> str:
-    """\"up from 10\" delta vs the most recent distinct prior value."""
+def _delta_html(values: list, current, direction: str | None = None) -> str:
+    """\"↑ from 10\" delta. Color reflects whether the movement is in the
+    metric's better direction (good/bad), not just the arrow direction."""
     if not values or current is None:
         return ""
     prior = None
@@ -161,7 +213,11 @@ def _delta_html(values: list, current) -> str:
         arrow = "↑" if current > prior else "↓"
     except TypeError:
         return ""
-    cls = "up" if current > prior else "down"
+    cls = _trend_class(current, prior, direction)
+    if not cls:
+        # Fall back to direction-only color (legacy behavior) when caller
+        # has not declared a direction.
+        cls = "up" if current > prior else "down"
     return f' <span class="delta {cls}">{arrow} from {_fmt_num(prior)}</span>'
 
 
@@ -177,23 +233,30 @@ def scorecard_strip(items: list, history_by_key: dict | None = None) -> str:
     for it in items:
         v = it.get("verdict", "warn")
         vlabel = VERDICT_LABEL.get(v, "")
-        note = esc(it.get("note", ""))
-        explain = esc(it.get("explain", ""))
+        note = esc_metric(it.get("note", ""))
+        explain = esc_metric(it.get("explain", ""))
         body = note
         if explain:
             body += f'<div class="scexplain">{explain}</div>'
         # Trend bits (only when history has the key)
         key = it.get("history_key")
         series = history_by_key.get(key) if key else None
-        spark = sparkline(series) if series else ""
         cur = it.get("current_number")
-        delta = _delta_html(series, cur) if series and cur is not None else ""
+        direction = _direction_for(it)
+        # Compute the "is this trending the right way?" class once; reuse it
+        # for both the sparkline stroke and the delta chip.
+        trend_cls = ""
+        if series and cur is not None:
+            prior = next((v for v in reversed(series[:-1]) if v != cur and v is not None), None)
+            trend_cls = _trend_class(cur, prior, direction)
+        spark = sparkline(series, trend_class=trend_cls) if series else ""
+        delta = _delta_html(series, cur, direction) if series and cur is not None else ""
         rows.append(
             '<details class="scrow">'
             '<summary>'
             '<span class="scchev">▸</span>'
-            f'<div class="scmain"><div class="sclabel">{esc(it.get("label", ""))}</div></div>'
-            f'<div class="scval">{esc(it.get("value", ""))}{delta}</div>'
+            f'<div class="scmain"><div class="sclabel">{esc_metric(it.get("label", ""))}</div></div>'
+            f'<div class="scval">{esc_metric(it.get("value", ""))}{delta}</div>'
             f'<div class="scspark">{spark}</div>'
             f'<span class="verdict {_verdict_class(v)}">{vlabel}</span>'
             '</summary>'
@@ -220,8 +283,13 @@ def rec_card(r: dict) -> str:
         f'<span class="rname">{name_html}</span>'
         f'<span class="rjob">{esc(r.get("job", ""))}</span></div>'
         f'<p class="ev"><b>Evidence.</b> {esc(r.get("evidence", ""))}</p>'
-        f'<p class="desc">{esc(r.get("description", ""))}</p>'
-        f'<div class="install">{install}</div>'
+        + (
+            '<details class="rec-desc">'
+            '<summary>What it does</summary>'
+            f'<p class="desc">{esc(r.get("description", ""))}</p>'
+            '</details>' if r.get("description") else ""
+        )
+        + f'<div class="install">{install}</div>'
         '</div>'
     )
 
@@ -308,30 +376,73 @@ def gap_item(g: dict) -> str:
     )
 
 
-def hero_verdict_card(verdict: dict, meta: dict) -> str:
-    """The hero: named verdict, summary, evidence chips, next move."""
-    if not verdict or not verdict.get("name"):
+def hero_card(verdict: dict, archetype: dict, meta: dict,
+              level_chip_inner: str = "") -> str:
+    """Combined hero: archetype + verdict + Daimon Level + evidence chips +
+    expandable archetype details. Replaces the previous separate hero+archetype
+    cards so the top of the report is one block instead of two."""
+    verdict = verdict or {}
+    archetype = archetype or {}
+    if not verdict.get("name") and not archetype.get("title"):
         return ""
+
+    days = esc(meta.get("days", "14"))
+    date = esc(meta.get("date", ""))
     chips = "".join(
         f'<span class="chip">{esc(c)}</span>' for c in (verdict.get("evidence_chips") or [])
     )
-    next_phrase = (verdict.get("next_phrase") or "").strip()
-    next_html = (
-        f'<div class="hv-next"><span class="hv-next-label">Next move</span>'
-        f'<code class="hv-phrase">{esc(next_phrase)}</code></div>'
-        if next_phrase else ""
-    )
-    days = esc(meta.get("days", "14"))
-    date = esc(meta.get("date", ""))
+    # Archetype identity (no separate card)
+    arch_title = esc(archetype.get("title", ""))
+    arch_tag = esc(archetype.get("tagline", ""))
+    # Verdict name + summary
+    v_name = esc(verdict.get("name", ""))
+    v_sum = esc(verdict.get("summary", ""))
+
+    # Expandable details: why/strength/watch-out/next ritual — collapsed by
+    # default so the top stays calm.
+    detail_rows = []
+    for label, key in (("Why this title", "why"), ("Strength", "strength"),
+                       ("Watch-out", "watch_out"), ("Next ritual", "next_ritual")):
+        val = (archetype.get(key) or "").strip()
+        if val:
+            detail_rows.append(
+                f'<dt class="arch-dt">{label}</dt><dd class="arch-dd">{esc(val)}</dd>'
+            )
+    details_html = (
+        '<details class="hero-details">'
+        '<summary>About this archetype</summary>'
+        f'<dl class="arch-dl">{"".join(detail_rows)}</dl>'
+        '</details>'
+    ) if detail_rows else ""
+
+    # Daimon Level chip: accept either inner HTML (legacy) or a full
+    # <div class="daimon-chip">…</div> block (current renderer).
+    chip_html = ""
+    if level_chip_inner:
+        chip_html = (level_chip_inner
+                     if 'class="daimon-chip"' in level_chip_inner
+                     else f'<div class="daimon-chip" title="Daimon Level">{level_chip_inner}</div>')
+
     return (
-        '<section class="hero-verdict">'
+        '<section class="hero-card">'
         f'<div class="hv-sub">Skills Daimon · Last {days} days · generated {date}</div>'
-        f'<h1 class="hv-name">{esc(verdict.get("name"))}</h1>'
-        f'<p class="hv-summary">{esc(verdict.get("summary", ""))}</p>'
+        f'{chip_html}'
+        f'<h1 class="hero-arch-title">{arch_title}</h1>'
+        f'<p class="hero-arch-tag">{arch_tag}</p>'
+        '<div class="hero-verdict-row">'
+        f'<span class="hero-verdict-label">Verdict</span>'
+        f'<span class="hero-verdict-name">{v_name}</span>'
+        '</div>'
+        f'<p class="hero-summary">{v_sum}</p>'
         f'<div class="hv-chips">{chips}</div>'
-        f'{next_html}'
+        f'{details_html}'
         '</section>'
     )
+
+
+# Back-compat shims — kept so any external caller still works.
+def hero_verdict_card(verdict: dict, meta: dict) -> str:
+    return hero_card(verdict, {}, meta, "")
 
 
 def primary_action_card(a: dict) -> str:
@@ -402,6 +513,28 @@ CSS = """
 body{margin:0;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   color:%(INK)s;-webkit-font-smoothing:antialiased;background:%(BG)s}
 .wrap{max-width:920px;margin:0 auto;padding:32px 24px 64px}
+/* sidebar nav — fixed left, icon strip; labels slide in on hover */
+.sidebar{position:fixed;top:24px;left:14px;display:flex;flex-direction:column;gap:6px;
+  padding:10px 8px;background:rgba(255,253,248,0.92);
+  border:1px solid #e7d6b6;border-radius:14px;
+  box-shadow:0 2px 10px rgba(124,74,40,0.08);
+  z-index:50;backdrop-filter:saturate(140%%) blur(6px)}
+.snav{display:flex;align-items:center;gap:10px;
+  text-decoration:none;color:%(INK)s;
+  padding:7px 10px;border-radius:10px;
+  font-size:13px;font-weight:600;
+  transition:background .12s,transform .12s}
+.snav:hover{background:#fff4dc;transform:translateX(2px)}
+.snav-ico{font-size:16px;line-height:1;width:18px;text-align:center}
+.snav-lbl{white-space:nowrap;max-width:0;overflow:hidden;opacity:0;
+  transition:max-width .18s ease,opacity .15s ease}
+.sidebar:hover .snav-lbl,.snav:focus .snav-lbl{max-width:160px;opacity:1}
+section{scroll-margin-top:24px}
+@media(max-width:1100px){
+  .sidebar{position:static;flex-direction:row;flex-wrap:wrap;justify-content:center;
+    margin:18px auto 0;max-width:920px;width:fit-content}
+  .snav-lbl{max-width:160px;opacity:1}
+}
 header.hero{background:linear-gradient(135deg,%(ACCENT)s,#7c3aed);color:#fff;
   border-radius:18px;padding:28px 30px;margin-bottom:28px}
 header.hero h1{margin:0 0 4px;font-size:26px;letter-spacing:-.3px}
@@ -433,7 +566,17 @@ h2.sec{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:%(ACCENT
 .rname a{color:%(ACCENT)s;text-decoration:none}
 .rname a:hover{text-decoration:underline}
 .rjob{color:%(MUTED)s;font-size:13px;margin-left:auto}
-.ev{margin:6px 0}.desc{color:#374151;margin:6px 0}
+.ev{margin:6px 0}.desc{color:#374151;margin:6px 0 0}
+details.rec-desc{margin:8px 0 0}
+details.rec-desc>summary{cursor:pointer;list-style:none;outline:none;
+  font-size:13px;font-weight:600;color:%(MUTED)s;
+  padding:4px 0;user-select:none;
+  display:inline-flex;align-items:center;gap:6px}
+details.rec-desc>summary::-webkit-details-marker{display:none}
+details.rec-desc>summary::before{content:"▸";font-size:11px;color:%(MUTED)s;
+  transition:transform .15s}
+details.rec-desc[open]>summary::before{transform:rotate(90deg)}
+details.rec-desc>summary:hover{color:%(INK)s}
 .install{margin-top:10px;display:flex;flex-direction:column;gap:6px}
 code{font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0f172a;color:#e2e8f0;
   padding:7px 11px;border-radius:8px;display:block;overflow-x:auto}
@@ -458,19 +601,32 @@ ul.gaps code{display:inline-block;margin-top:6px}
 .scorecard{padding:6px 20px}
 details.scrow{border-bottom:1px solid #f1f2f5}
 details.scrow:last-child{border-bottom:0}
-details.scrow summary{display:flex;align-items:center;gap:12px;padding:14px 0;cursor:pointer;
+details.scrow summary{display:grid;
+  grid-template-columns:18px minmax(0,1fr) 180px 90px 120px;
+  align-items:center;gap:14px;padding:14px 0;cursor:pointer;
   list-style:none;outline:none}
 details.scrow summary::-webkit-details-marker{display:none}
-.scchev{color:%(MUTED)s;font-size:12px;transition:transform .15s;flex-shrink:0}
+.scchev{color:%(MUTED)s;font-size:12px;transition:transform .15s;justify-self:start}
 details.scrow[open] .scchev{transform:rotate(90deg)}
-.scmain{flex:1;min-width:0}
-.sclabel{font-weight:600;font-size:15px}
-.scval{font-variant-numeric:tabular-nums;font-weight:700;font-size:15px;white-space:nowrap;color:%(MUTED)s}
-.scspark{color:%(ACCENT)s;opacity:.85;flex-shrink:0;min-width:72px;text-align:right}
+.scmain{min-width:0}
+.sclabel{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.scval{font-variant-numeric:tabular-nums;font-weight:700;font-size:15px;white-space:nowrap;color:%(MUTED)s;text-align:right}
+.scspark{color:%(ACCENT)s;opacity:.85;text-align:right;line-height:0}
+@media(max-width:680px){
+  details.scrow summary{grid-template-columns:18px minmax(0,1fr) auto;row-gap:6px;column-gap:10px}
+  .scval{grid-column:2/4;text-align:left}
+  .scspark{display:none}
+}
 .delta{font-size:12px;font-weight:600;margin-left:6px}
+/* legacy direction-only (kept for back-compat with payloads that don't declare direction) */
 .delta.up{color:%(BAD)s}
 .delta.down{color:%(GOOD)s}
-.scrow .verdict{margin:0;flex-shrink:0}
+/* direction-of-goodness (preferred) */
+.delta.good{color:%(GOOD)s}
+.delta.bad{color:%(BAD)s}
+.sline.good{color:%(GOOD)s}
+.sline.bad{color:%(BAD)s}
+.scrow .verdict{margin:0;justify-self:end}
 .scbody{padding:0 0 16px 24px;color:#374151;font-size:13.5px;line-height:1.55}
 .scexplain{margin-top:8px;padding:10px 12px;background:#f7f8fb;border-radius:8px;color:%(INK)s}
 .verdict{text-align:center;font-size:12.5px;font-weight:600;margin:12px auto 0;
@@ -479,20 +635,35 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .verdict.watch{background:#FFFBEB;color:%(WATCH)s}
 .verdict.bad{background:#FEF2F2;color:%(BAD)s}
 .verdict.nodata{background:#F3F4F6;color:%(MUTED)s}
-/* hero verdict */
-.hero-verdict{background:linear-gradient(135deg,%(ACCENT)s,#7c3aed);color:#fff;
-  border-radius:20px;padding:30px 32px;margin-bottom:20px;box-shadow:0 8px 28px rgba(109,40,217,.18)}
+/* combined hero (archetype + verdict in one card) */
+.hero-card{position:relative;background:linear-gradient(135deg,%(ACCENT)s,#7c3aed);color:#fff;
+  border-radius:20px;padding:28px 32px;margin-bottom:20px;box-shadow:0 8px 28px rgba(109,40,217,.18)}
 .hv-sub{font-size:12px;text-transform:uppercase;letter-spacing:.8px;opacity:.85;margin-bottom:10px}
-.hv-name{margin:0 0 10px;font-size:34px;font-weight:800;letter-spacing:-.5px;line-height:1.1}
-.hv-summary{margin:0 0 14px;font-size:16px;line-height:1.45;opacity:.95;max-width:60ch}
-.hv-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.hero-arch-title{margin:0 0 4px;font-size:30px;font-weight:800;letter-spacing:-.3px;line-height:1.1}
+.hero-arch-tag{margin:0 0 14px;font-size:14px;opacity:.9;font-style:italic;max-width:60ch}
+.hero-verdict-row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.hero-verdict-label{font-size:11px;text-transform:uppercase;letter-spacing:.8px;opacity:.85}
+.hero-verdict-name{font-size:22px;font-weight:800;letter-spacing:-.2px}
+.hero-summary{margin:0 0 12px;font-size:15.5px;line-height:1.45;opacity:.95;max-width:60ch}
+.hv-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
 .chip{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);
   padding:4px 10px;border-radius:999px;font-size:12px;font-variant-numeric:tabular-nums}
-.hv-next{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  padding:12px 14px;background:rgba(255,255,255,.13);border-radius:12px}
-.hv-next-label{font-size:11px;text-transform:uppercase;letter-spacing:.8px;opacity:.85}
-.hv-phrase{display:inline-block;background:#0f172a;color:#fff;padding:7px 11px;
-  border-radius:8px;font:13.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+/* Daimon chip inside the hero (overrides the archetype-card placement) */
+.hero-card .daimon-chip{position:absolute;top:18px;right:20px;background:rgba(255,255,255,.18);
+  color:#fff;border-color:rgba(255,255,255,.28)}
+/* Expandable archetype details, kept calm */
+.hero-details{margin-top:6px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);
+  border-radius:12px;padding:6px 14px}
+.hero-details summary{cursor:pointer;font-size:12.5px;font-weight:700;letter-spacing:.4px;
+  text-transform:uppercase;opacity:.92;padding:8px 0;list-style:none}
+.hero-details summary::-webkit-details-marker{display:none}
+.hero-details summary:before{content:"▸ ";display:inline-block;margin-right:4px;transition:transform .15s}
+.hero-details[open] summary:before{content:"▾ "}
+.hero-details .arch-dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;
+  margin:6px 0 12px;font-size:13.5px;line-height:1.5}
+.hero-details .arch-dt{font-weight:700;color:#FDE68A}
+.hero-details .arch-dd{margin:0;color:#fff;opacity:.92}
+@media(max-width:520px){.hero-card .daimon-chip{position:static;display:inline-flex;margin:0 0 12px}}
 /* primary action */
 .primary-action{border-left:5px solid %(ACCENT)s}
 .pa-tag{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:%(ACCENT)s;
@@ -514,6 +685,93 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .trust .trust-title{font-size:15px;margin:0 0 8px;color:%(INK)s}
 .trust-list{margin:0;padding:0 0 0 18px;color:#374151;font-size:13.5px;line-height:1.55}
 .trust-list li{margin:4px 0}
+/* daimon level chip (top-right of archetype card; absolute so it never
+   collides with the archetype label on narrow screens) */
+.archetype-card{position:relative}
+.daimon-chip{position:absolute;top:14px;right:18px;display:inline-flex;align-items:center;gap:6px;
+  background:%(ACCENT_SOFT)s;color:%(ACCENT)s;border:1px solid %(GAP)s;
+  border-radius:999px;padding:4px 10px;font-size:12px;font-weight:600}
+.daimon-chip .dc-val{font-size:14px;font-weight:800;margin:0 2px}
+.daimon-chip .dc-xp{opacity:.75;font-weight:500}
+@media(max-width:520px){.daimon-chip{position:static;display:inline-flex;margin:0 0 10px}}
+/* quest card — single strong label, no duplicate pseudo-element */
+.quest{border:2px solid #d7bc92;background:#fff8e7;border-left-width:6px;border-left-color:#B45309;position:relative}
+.quest-tag{display:inline-block;background:#B45309;color:#fff;font-size:11px;text-transform:uppercase;
+  letter-spacing:1px;font-weight:900;padding:4px 10px;border-radius:6px;margin-bottom:10px}
+.quest-tag:before{content:"⚔ ";margin-right:2px}
+.quest-title{margin:0 0 8px;font-size:22px;font-weight:900;color:#2F271F}
+.quest-why{margin:6px 0;color:#374151}
+.quest-do{margin:10px 0}
+.quest-do-label{font-size:11px;font-weight:900;color:%(GOOD)s;text-transform:uppercase;letter-spacing:.5px}
+.quest-do code{display:inline-block;margin-left:6px}
+.quest-reward{margin:10px 0 0;color:#374151;font-size:13.5px;font-weight:700}
+.quest-note{display:block;margin-top:4px;color:%(MUTED)s;font-size:12px;font-weight:500}
+.quest-track{display:inline-block;margin:4px 0 8px;font-size:12px;color:%(MUTED)s}
+.quest-empty{background:#fff;border-color:%(GAP)s;border-left-color:%(MUTED)s}
+.quest-empty .quest-tag{background:%(MUTED)s}
+.quest-jump{display:inline;color:#8A5B21;text-decoration:underline;text-underline-offset:2px;
+  font-size:12.5px;font-weight:600;margin-left:6px}
+.quest-jump:hover{color:#B45309}
+.quest-empty .quest-jump{color:%(MUTED)s}
+.quest-empty .quest-jump:hover{color:#4B5563}
+html{scroll-behavior:smooth}
+/* grove */
+.grove-card{padding:0;overflow:hidden;background:#fffdf8;border-color:#e7d6b6}
+.grove-banner{padding:18px 22px 16px;background:#fff4dc;border-bottom:1px solid #ead6b5}
+.grove-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.grove-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#8A5B21;font-weight:800}
+.grove-title{margin:2px 0 0;font-size:24px;font-weight:900;color:#2F271F;letter-spacing:0}
+.grove-lead{margin:6px 0 0;color:#6B5A46;max-width:68ch}
+.grove-stats{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.grove-stat{min-width:118px;background:#fffaf0;border:1px solid #ead6b5;border-radius:8px;padding:8px 10px;text-align:right}
+.grove-stat b{display:block;font-size:18px;line-height:1;color:#2F271F;font-variant-numeric:tabular-nums}
+.grove-stat span{display:block;margin-top:4px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#7B6A58}
+.grove-progress{margin-top:12px;background:#ead6b5;border-radius:999px;height:12px;overflow:hidden;border:1px solid #d7bc92}
+.grove-progress span{display:block;height:100%%;min-width:8px;background:#0F766E;border-radius:999px}
+.grove-guide{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.grove-guide-pill{background:#fffaf0;border:1px solid #ead6b5;border-radius:8px;padding:7px 9px;
+  color:#4B5563;font-size:12px;line-height:1.2}
+.grove-guide-pill b{color:#2F271F}
+.grove-body{padding:16px 18px 18px}
+.grove-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:start;margin-bottom:14px}
+.grove-summary-main{font-size:16px;color:#374151}
+.grove-summary-main b{color:%(GOOD)s}
+.grove-next{margin:6px 0 0;color:#4B5563;font-size:13.5px}
+.grove-relics{display:flex;flex-wrap:wrap;gap:7px;justify-content:flex-end;max-width:360px}
+.grove-map{background:#fff8e7;border:1px solid #ead6b5;border-radius:8px;padding:8px;margin-bottom:14px}
+.grove-map svg{display:block;width:100%%;height:auto}
+.grove-skills{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.grove-skill{border:1px solid #ead6b5;border-radius:8px;background:#fff;padding:12px;min-height:132px}
+.grove-skill.changed{border-color:#A7F3D0;background:#F0FDF4}
+.grove-skill.needs{border-color:#FDE68A;background:#FFFBEB}
+.grove-skill-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.grove-sigil{width:34px;height:34px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;
+  background:#F3E8FF;color:%(ACCENT)s;font-size:12px;font-weight:900;border:1px solid #DDD6FE}
+.grove-skill.changed .grove-sigil{background:#D1FAE5;color:%(GOOD)s;border-color:#A7F3D0}
+.grove-skill.needs .grove-sigil{background:#FEF3C7;color:%(WATCH)s;border-color:#FDE68A}
+.grove-skill-title{font-weight:800;color:#2F271F;line-height:1.15}
+.grove-skill-meta{font-size:12px;color:%(MUTED)s;font-variant-numeric:tabular-nums}
+.grove-skill-delta{display:inline-block;margin-bottom:7px;font-size:12px;font-weight:800;border-radius:999px;padding:3px 8px;background:#F3F4F6;color:%(MUTED)s}
+.grove-skill-delta.changed{background:#D1FAE5;color:%(GOOD)s}
+.grove-skill-delta.needs{background:#FEF3C7;color:%(WATCH)s}
+.grove-skill-evidence{font-size:12.5px;color:#4B5563;line-height:1.4}
+.grove-ledger{border-top:1px solid #ead6b5;padding-top:10px}
+.grove-ledger summary{cursor:pointer;color:#6B5A46;font-weight:800;font-size:13px;list-style:none}
+.grove-ledger summary::-webkit-details-marker{display:none}
+.grove-ledger summary:before{content:"▸";display:inline-block;margin-right:6px;color:%(MUTED)s}
+.grove-ledger[open] summary:before{transform:rotate(90deg)}
+.grove-tracks{width:100%%;border-collapse:collapse;font-size:13px;margin:10px 0 6px}
+.grove-tracks th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+  color:%(MUTED)s;border-bottom:1px solid %(GAP)s;padding:6px 8px}
+.grove-tracks td{padding:7px 8px;border-bottom:1px solid #f1f2f5}
+.grove-tracks td.num,.grove-tracks th.num{text-align:right;font-variant-numeric:tabular-nums}
+.grove-ev{color:%(MUTED)s;font-size:13px}
+.delta-flat{color:%(MUTED)s}
+.grove-badge{font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid %(GAP)s}
+.grove-badge.on{background:#ECFDF5;border-color:#A7F3D0;color:%(GOOD)s;font-weight:700}
+.grove-badge.off{color:%(MUTED)s;background:#fff}
+.grove-cap{margin:10px 0 0;color:%(MUTED)s;font-size:12px;text-align:center}
+@media(max-width:760px){.grove-summary{grid-template-columns:1fr}.grove-relics{justify-content:flex-start}.grove-skills{grid-template-columns:1fr}.grove-stat{text-align:left}}
 /* catalog source strip (outside the hero now) */
 .srcstrip{padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .srclabel-dark{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
@@ -549,6 +807,181 @@ footer{margin-top:40px;color:%(MUTED)s;font-size:12px;text-align:center}
 }
 
 
+def _gamify_blocks(payload: dict, m: dict):
+    """Return (level_chip_html, quest_card_html, grove_section_html) — empty
+    strings if gamification is unavailable. Pulls fresh history so deltas
+    are honest. Never raises into the renderer."""
+    try:
+        import gamify as _gamify    # type: ignore
+        import history as _history  # type: ignore
+    except Exception:
+        return "", "", ""
+    try:
+        entries = _history.read_last(8, window_days=int(m.get("days") or 0) or None)
+    except Exception:
+        entries = []
+    try:
+        gs = _gamify.build_game_state(payload, entries, today=m.get("date"),
+                                       window_days=m.get("days"))
+    except Exception:
+        return "", "", ""
+
+    # Top: a compact Daimon Level chip next to the archetype.
+    level_chip = (
+        f'<div class="daimon-chip" title="Daimon Level">'
+        f'<span class="dc-label">Daimon Level</span>'
+        f'<span class="dc-val">{int(gs["daimon_level"])}</span>'
+        f'<span class="dc-xp">· {int(gs["xp_total"])} XP</span>'
+        f'</div>'
+    )
+
+    summary = gs.get("grove_summary") or _gamify.build_grove_summary(gs)
+
+    # Quest card (after compact Grove summary).
+    quest = gs.get("active_quest")
+    if quest:
+        quest_html = (
+            '<section class="quest card">'
+            '<div class="quest-tag">Active mission</div>'
+            f'<h2 class="quest-title">{esc(quest.get("title"))}</h2>'
+            f'<span class="quest-track">Track: {esc(_gamify.display_track_name(quest.get("track","")))}</span>'
+            f'<p class="quest-why">{esc(quest.get("why",""))}</p>'
+            f'<div class="quest-do"><span class="quest-do-label">Do</span>'
+            f' <code>{esc(quest.get("do",""))}</code></div>'
+            f'<p class="quest-reward"><b>Reward.</b> {esc(quest.get("reward",""))} '
+            '<a class="quest-jump" href="#daimon-grove">see stats ↓</a>'
+            '<span class="quest-note">No XP for accepting the mission; XP unlocks only after a later report verifies the improvement.</span></p>'
+            '</section>'
+        )
+    else:
+        quest_html = (
+            '<section class="quest quest-empty card">'
+            '<div class="quest-tag">Mission board</div>'
+            '<h2 class="quest-title">No mission this run</h2>'
+            '<p class="quest-why">No strong evidence-backed mission appeared in this report. '
+            '<a class="quest-jump" href="#daimon-grove">see stats ↓</a></p>'
+            '</section>'
+        )
+
+    # Grove + XP movements.
+    earned = sum(1 for b in gs.get("badges", []) if b.get("earned"))
+    delta_total = int(summary.get("xp_delta_total") or 0)
+    xp_total = int(gs.get("xp_total") or 0)
+    daimon_level = int(gs.get("daimon_level") or 0)
+    thresholds = getattr(_gamify, "DAIMON_LEVEL_THRESHOLDS", (0, 100))
+    floor_idx = max(0, min(daimon_level - 1, len(thresholds) - 1))
+    next_idx = max(0, min(daimon_level, len(thresholds) - 1))
+    level_floor = int(thresholds[floor_idx])
+    next_level_xp = int(thresholds[next_idx])
+    if next_level_xp <= level_floor:
+        progress_pct = 100
+        progress_label = "Max rank reached"
+    else:
+        progress_pct = max(0, min(100, round(100 * (xp_total - level_floor) / (next_level_xp - level_floor))))
+        progress_label = f'{max(0, next_level_xp - xp_total)} XP to Level {daimon_level + 1}'
+
+    track_rows = []
+    skill_cards = []
+    sigils = {
+        "automation": "CT",
+        "memory": "MW",
+        "safety": "GT",
+        "planning": "PP",
+        "tool_fluency": "TS",
+        "project_hygiene": "RS",
+    }
+    for track_id in _gamify.TRACKS:
+        t = gs["tracks"].get(track_id) or {}
+        delta = int(t.get("delta") or 0)
+        status = t.get("status") or ""
+        delta_cls = "delta down" if delta > 0 else "delta-flat"
+        card_cls = "grove-skill"
+        delta_badge_cls = "grove-skill-delta"
+        if delta > 0:
+            card_cls += " changed"
+            delta_badge_cls += " changed"
+        elif status == "needs_data":
+            card_cls += " needs"
+            delta_badge_cls += " needs"
+        delta_label = esc(t.get("delta_label") or _gamify.format_delta(delta, status))
+        skill_cards.append(
+            f'<article class="{card_cls}">'
+            '<div class="grove-skill-head">'
+            f'<span class="grove-sigil">{esc(sigils.get(track_id, ""))}</span>'
+            '<div>'
+            f'<div class="grove-skill-title">{esc(t.get("grove_area") or t.get("name") or _gamify.display_track_name(track_id))}</div>'
+            f'<div class="grove-skill-meta">{esc(t.get("name") or _gamify.display_track_name(track_id))} · L{int(t.get("level") or 0)} · {int(t.get("xp") or 0)} XP</div>'
+            '</div></div>'
+            f'<span class="{delta_badge_cls}">{delta_label}</span>'
+            f'<div class="grove-skill-evidence">{esc(t.get("evidence",""))}</div>'
+            '</article>'
+        )
+        track_rows.append(
+            f'<tr><td>{esc(t.get("name") or _gamify.display_track_name(track_id))}</td>'
+            f'<td class="num">L{int(t.get("level") or 0)}</td>'
+            f'<td class="num">{int(t.get("xp") or 0)} XP</td>'
+            f'<td class="num"><span class="{delta_cls}">{delta_label}</span></td>'
+            f'<td class="grove-ev">{esc(t.get("evidence",""))}</td></tr>'
+        )
+    earned_badges = [b for b in gs.get("badges", []) if b.get("earned")]
+    badges_html = "".join(
+        f'<span class="grove-badge on">{esc(b["name"])}</span>'
+        for b in earned_badges
+    )
+    if not badges_html:
+        badges_html = '<span class="grove-badge off">No badges earned yet. Badges unlock from verified milestones.</span>'
+    rhythm_count = len(gs.get("rhythms") or {})
+    grove_html = (
+        '<div class="card grove-card" id="daimon-grove">'
+        '<div class="grove-banner">'
+        '<div class="grove-head">'
+        '<div>'
+        '<div class="grove-kicker">RPG habit map</div>'
+        f'<h2 class="grove-title">Daimon Grove · Level {daimon_level}</h2>'
+        '<p class="grove-lead">Each landmark is one craft habit. Green means it improved this run; amber means the report needs more evidence.</p>'
+        '</div>'
+        '<div class="grove-stats">'
+        f'<div class="grove-stat"><b>{xp_total}</b><span>Total XP</span></div>'
+        f'<div class="grove-stat"><b>+{delta_total}</b><span>XP earned this run</span></div>'
+        f'<div class="grove-stat"><b>{earned}</b><span>Relics</span></div>'
+        '</div>'
+        '</div>'
+        f'<div class="grove-progress" aria-label="{esc(progress_label)}"><span style="width:{progress_pct}%"></span></div>'
+        f'<p class="cap">{esc(progress_label)}</p>'
+        '<div class="grove-guide" aria-label="Daimon Grove legend">'
+        '<span class="grove-guide-pill"><b>Landmark</b> habit area</span>'
+        '<span class="grove-guide-pill"><b>Green</b> verified improvement</span>'
+        '<span class="grove-guide-pill"><b>Amber</b> needs evidence</span>'
+        '<span class="grove-guide-pill"><b>Relic</b> verified milestone</span>'
+        '<span class="grove-guide-pill"><b>Mission</b> next habit to try</span>'
+        '</div>'
+        '</div>'
+        '<div class="grove-body">'
+        '<div class="grove-summary">'
+        '<div class="grove-summary-main">'
+        f'<b>+{delta_total} XP verified this run.</b> {esc(summary.get("change_sentence",""))}'
+        f'<p class="grove-next">{esc(summary.get("next_quest",""))}</p>'
+        '</div>'
+        f'<div class="grove-relics">{badges_html}</div>'
+        '</div>'
+        f'<div class="grove-map">{_gamify.render_grove_svg(gs["grove"])}</div>'
+        f'<div class="grove-skills">{"".join(skill_cards)}</div>'
+        '<details class="grove-ledger">'
+        '<summary>Why XP changed (evidence ledger)</summary>'
+        '<table class="grove-tracks">'
+        '<thead><tr><th>Track</th><th class="num">Level</th><th class="num">XP</th>'
+        '<th class="num">This run</th><th>Evidence receipt</th></tr></thead>'
+        f'<tbody>{"".join(track_rows)}</tbody></table>'
+        '</details>'
+        f'<p class="grove-cap">Relics earned: {earned} · Missions verified: {int(gs.get("quests_completed_count",0))} · '
+        f'Privacy: {rhythm_count} numeric signals saved, no commands, paths, or session IDs</p>'
+        '</div>'
+        '</div>'
+    )
+
+    return level_chip, quest_html, grove_html
+
+
 def render(payload: dict) -> str:
     m = payload.get("meta", {})
     recs = payload.get("recommendations", [])
@@ -557,24 +990,27 @@ def render(payload: dict) -> str:
     charts = payload.get("charts", {})
     work_recap = payload.get("work_recap", {})
 
-    # ─── HERO VERDICT (replaces the old hero/title) ────────────────────────
-    hero_html = hero_verdict_card(payload.get("verdict") or {}, m)
-    # If no verdict was provided (payload missing it) fall back to a tiny
-    # title bar so the report still has a top.
+    level_chip_html, quest_html, grove_html = _gamify_blocks(payload, m)
+
+    # ─── COMBINED HERO (verdict + archetype + Daimon Level in one card) ───
+    hero_html = hero_card(
+        payload.get("verdict") or {},
+        payload.get("archetype") or {},
+        m,
+        level_chip_html or "",
+    )
     if not hero_html:
         date = esc(m.get("date", ""))
         days = esc(m.get("days", 14))
         hero_html = (
-            '<section class="hero-verdict">'
+            '<section class="hero-card">'
             '<div class="hv-sub">Skills Daimon · Last '
             f'{days} days · generated {date}</div>'
-            '<h1 class="hv-name">Snapshot</h1>'
-            '<p class="hv-summary">No verdict supplied; showing the underlying signals below.</p>'
+            '<h1 class="hero-arch-title">Snapshot</h1>'
+            '<p class="hero-summary">No verdict supplied; showing the underlying signals below.</p>'
             '</section>'
         )
-
-    # ─── ARCHETYPE CARD (5-part) ───────────────────────────────────────────
-    arch_html = archetype_card(payload.get("archetype") or {})
+    arch_html = ""  # merged into hero_html; kept for assembly compatibility
 
     # ─── PRIMARY ACTION CARD ───────────────────────────────────────────────
     pa_html = primary_action_card(payload.get("primary_action") or {})
@@ -585,7 +1021,7 @@ def render(payload: dict) -> str:
     )
     catalog_strip = (
         '<section class="srcstrip card">'
-        '<div class="srclabel-dark">Skill sources searched <span>— marketplaces &amp; registries</span></div>'
+        '<div class="srclabel-dark">Skill sources searched <span>— marketplaces, registries &amp; MCP catalogs</span></div>'
         f'<div class="badges">{badges}</div>'
         '</section>'
     ) if badges else ""
@@ -612,7 +1048,7 @@ def render(payload: dict) -> str:
 
     scorecard_html = (
         '<h2 class="sec">🩺 Workflow signals</h2>'
-        '<p class="seclead">How you\'re working, scored where there\'s a clear better way. Good · Watch · Needs action · No data.</p>'
+        '<p class="seclead">How you\'re working, scored where there\'s a clear better way.</p>'
         + scorecard_strip(scorecard, history_by_key)
         if scorecard else ""
     )
@@ -637,38 +1073,57 @@ def render(payload: dict) -> str:
         if coaching else ""
     )
 
-    # ─── ACTIVITY BARS (context only, at the bottom) ───────────────────────
-    chart_blocks = []
-    if charts.get("tool_use_top"):
-        chart_blocks.append(bar_chart(charts["tool_use_top"], "Tool use", top=8, color=BAR))
-    if charts.get("bash_verbs_top"):
-        chart_blocks.append(bar_chart(charts["bash_verbs_top"], "Top bash verbs", top=10, color=INFO))
-    charts_html = (
-        '<h2 class="sec">📊 Your activity — just for context</h2>'
-        '<p class="seclead">Raw counts, no score. Just what you ran most.</p>'
-        f'<div class="charts">{"".join(chart_blocks)}</div>'
-        if chart_blocks else ""
+    # Sidebar — only entries whose section actually rendered show up.
+    nav_items = [
+        ("hero",     "🏛", "Verdict",       hero_html or arch_html),
+        ("action",   "🎯", "Next action",   pa_html),
+        ("mission",  "⚔",  "Mission",       quest_html),
+        ("recs",     "✨", "Recommendations", recs_html),
+        ("signals",  "🩺", "Signals",       scorecard_html),
+        ("coaching", "⚑",  "Coaching",      coach_html),
+        ("gaps",     "🛠",  "Build",         gaps_html),
+        ("grove",    "🌲", "Grove",         grove_html),
+        ("recap",    "🧭", "What you did",  recap_html),
+    ]
+    sidebar_html = (
+        '<aside class="sidebar" aria-label="Jump to section">'
+        + "".join(
+            f'<a class="snav" href="#sec-{slug}" title="{label}">'
+            f'<span class="snav-ico" aria-hidden="true">{ico}</span>'
+            f'<span class="snav-lbl">{label}</span></a>'
+            for slug, ico, label, present in nav_items if present
+        )
+        + '</aside>'
     )
+
+    def _sec(slug: str, html_block: str) -> str:
+        return f'<section id="sec-{slug}">{html_block}</section>' if html_block else ""
 
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         "<title>Skills Daimon</title><style>" + CSS + "</style></head><body>"
-        '<div class="wrap">'
-        + hero_html
-        + arch_html
-        + pa_html
-        + catalog_strip
-        + recs_html         # main focus, immediately after the primary action
-        + recap_html
-        + scorecard_html
-        + gaps_html
-        + coach_html
-        + charts_html
+        + sidebar_html
+        + '<div class="wrap">'
+        + _sec("hero",     (hero_html or "") + (arch_html or ""))
+        + _sec("action",   pa_html)
+        + _sec("mission",  quest_html)
+        + _sec("recs",     recs_html + catalog_strip)
+        + _sec("signals",  scorecard_html)
+        + _sec("gaps",     gaps_html)
+        + _sec("coaching", coach_html)
+        + _sec("grove",    grove_html)
+        + _sec("recap",    recap_html)
         + '<footer>🏛 Generated by <b>Skills Daimon</b> · evidence from your own '
           'Claude Code sessions · nothing left this machine 🔒</footer>'
         "</div></body></html>"
     )
+
+
+def render_redacted(payload: dict) -> str:
+    """Render with the shared redactor on input payload and HTML write output."""
+    safe_payload = redact_in(payload)
+    return redact_in(render(safe_payload))
 
 
 def main() -> int:
@@ -684,7 +1139,7 @@ def main() -> int:
     out_dir = Path.home() / ".claude" / "skills" / "skills-daimon" / "reports"
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"skills-daimon-{date}.html"
-    out.write_text(render(payload), encoding="utf-8")
+    out.write_text(redact_in(render(payload)), encoding="utf-8")
 
     print(json.dumps({
         "path": str(out),
