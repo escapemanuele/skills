@@ -460,18 +460,20 @@ class TestDisplayPolish(unittest.TestCase):
         payload["command_events"] = {"saved_from_repeated_prompt": 1}
         html = _render_with_history(payload, _history())
         self.assertIn("Daimon Grove · Level", html)
-        self.assertIn("RPG progress, evidence locked", html)
+        self.assertIn("RPG habit map", html)
         self.assertIn("Daimon Grove Adventure Map", html)
-        self.assertIn("Evidence ledger", html)
-        # Single strong label per quest card (was previously "Quest Log").
-        self.assertRegex(html, r'class="quest-tag">(Active quest|Quest)<')
+        self.assertIn("Why XP changed (evidence ledger)", html)
+        self.assertIn("Landmark", html)
+        self.assertIn("Relic", html)
+        # Single strong label per mission card.
+        self.assertRegex(html, r'class="quest-tag">(Active mission|Mission board)<')
         self.assertIn("XP verified this run", html)
         self.assertIn("Tool Fluency", html)
         self.assertIn("Project Hygiene", html)
         self.assertNotIn("tool_fluency", html)
         self.assertNotIn("project_hygiene", html)
         self.assertNotIn('<span class="delta-flat">·</span>', html)
-        self.assertTrue("Active quest" in html or "No active quest this run" in html)
+        self.assertTrue("Active mission" in html or "No mission this run" in html)
 
 
 class TestRedactionBoundaries(unittest.TestCase):

@@ -665,6 +665,13 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .quest-track{display:inline-block;margin:4px 0 8px;font-size:12px;color:%(MUTED)s}
 .quest-empty{background:#fff;border-color:%(GAP)s;border-left-color:%(MUTED)s}
 .quest-empty .quest-tag{background:%(MUTED)s}
+.quest-jump{display:inline-block;margin-top:14px;background:#B45309;color:#fff;text-decoration:none;
+  font-size:13px;font-weight:800;letter-spacing:.3px;padding:8px 14px;border-radius:8px;
+  border:1px solid #8A5B21}
+.quest-jump:hover{background:#92400E}
+.quest-empty .quest-jump{background:%(MUTED)s;border-color:%(MUTED)s}
+.quest-empty .quest-jump:hover{background:#4B5563}
+html{scroll-behavior:smooth}
 /* grove */
 .grove-card{padding:0;overflow:hidden;background:#fffdf8;border-color:#e7d6b6}
 .grove-banner{padding:18px 22px 16px;background:#fff4dc;border-bottom:1px solid #ead6b5}
@@ -792,21 +799,24 @@ def _gamify_blocks(payload: dict, m: dict):
     if quest:
         quest_html = (
             '<section class="quest card">'
-            '<div class="quest-tag">Active quest</div>'
+            '<div class="quest-tag">Active mission</div>'
             f'<h2 class="quest-title">{esc(quest.get("title"))}</h2>'
             f'<span class="quest-track">Track: {esc(_gamify.display_track_name(quest.get("track","")))}</span>'
             f'<p class="quest-why">{esc(quest.get("why",""))}</p>'
             f'<div class="quest-do"><span class="quest-do-label">Do</span>'
             f' <code>{esc(quest.get("do",""))}</code></div>'
-            f'<p class="quest-reward"><b>Reward.</b> {esc(quest.get("reward",""))}</p>'
+            f'<p class="quest-reward"><b>Reward.</b> {esc(quest.get("reward",""))}'
+            '<span class="quest-note">No XP for accepting the mission; XP unlocks only after a later report verifies the improvement.</span></p>'
+            '<a class="quest-jump" href="#daimon-grove">See your stats →</a>'
             '</section>'
         )
     else:
         quest_html = (
             '<section class="quest quest-empty card">'
-            '<div class="quest-tag">Quest</div>'
-            '<h2 class="quest-title">No active quest this run</h2>'
-            '<p class="quest-why">The report did not find a strong enough evidence-backed opportunity.</p>'
+            '<div class="quest-tag">Mission board</div>'
+            '<h2 class="quest-title">No mission this run</h2>'
+            '<p class="quest-why">No strong evidence-backed mission appeared in this report. Missions appear when one habit clearly needs work.</p>'
+            '<a class="quest-jump" href="#daimon-grove">See your stats →</a>'
             '</section>'
         )
 
@@ -879,13 +889,13 @@ def _gamify_blocks(payload: dict, m: dict):
         badges_html = '<span class="grove-badge off">No badges earned yet. Badges unlock from verified milestones.</span>'
     rhythm_count = len(gs.get("rhythms") or {})
     grove_html = (
-        '<div class="card grove-card">'
+        '<div class="card grove-card" id="daimon-grove">'
         '<div class="grove-banner">'
         '<div class="grove-head">'
         '<div>'
-        '<div class="grove-kicker">RPG progress, evidence locked</div>'
+        '<div class="grove-kicker">RPG habit map</div>'
         f'<h2 class="grove-title">Daimon Grove · Level {daimon_level}</h2>'
-        '<p class="grove-lead">Your grove grows only when the report verifies a real habit improvement.</p>'
+        '<p class="grove-lead">Each landmark is one craft habit. Green means it improved this run; amber means the report needs more evidence.</p>'
         '</div>'
         '<div class="grove-stats">'
         f'<div class="grove-stat"><b>{xp_total}</b><span>Total XP</span></div>'
@@ -895,6 +905,13 @@ def _gamify_blocks(payload: dict, m: dict):
         '</div>'
         f'<div class="grove-progress" aria-label="{esc(progress_label)}"><span style="width:{progress_pct}%"></span></div>'
         f'<p class="cap">{esc(progress_label)}</p>'
+        '<div class="grove-guide" aria-label="Daimon Grove legend">'
+        '<span class="grove-guide-pill"><b>Landmark</b> habit area</span>'
+        '<span class="grove-guide-pill"><b>Green</b> verified improvement</span>'
+        '<span class="grove-guide-pill"><b>Amber</b> needs evidence</span>'
+        '<span class="grove-guide-pill"><b>Relic</b> verified milestone</span>'
+        '<span class="grove-guide-pill"><b>Mission</b> next habit to try</span>'
+        '</div>'
         '</div>'
         '<div class="grove-body">'
         '<div class="grove-summary">'
@@ -907,14 +924,14 @@ def _gamify_blocks(payload: dict, m: dict):
         f'<div class="grove-map">{_gamify.render_grove_svg(gs["grove"])}</div>'
         f'<div class="grove-skills">{"".join(skill_cards)}</div>'
         '<details class="grove-ledger">'
-        '<summary>Evidence ledger</summary>'
+        '<summary>Why XP changed (evidence ledger)</summary>'
         '<table class="grove-tracks">'
         '<thead><tr><th>Track</th><th class="num">Level</th><th class="num">XP</th>'
         '<th class="num">This run</th><th>Evidence receipt</th></tr></thead>'
         f'<tbody>{"".join(track_rows)}</tbody></table>'
         '</details>'
-        f'<p class="grove-cap">Relics earned: {earned} · Quests verified: {int(gs.get("quests_completed_count",0))} · '
-        f'{rhythm_count} numeric signals saved · no commands, paths, or session IDs</p>'
+        f'<p class="grove-cap">Relics earned: {earned} · Missions verified: {int(gs.get("quests_completed_count",0))} · '
+        f'Privacy: {rhythm_count} numeric signals saved, no commands, paths, or session IDs</p>'
         '</div>'
         '</div>'
     )
@@ -1021,13 +1038,13 @@ def render(payload: dict) -> str:
         + hero_html
         + arch_html
         + pa_html
-        + quest_html        # one active quest, right after the primary action (charter §)
+        + quest_html        # one active mission, right after the primary action
         + recs_html         # catalog-backed recommendations
         + catalog_strip     # provenance: where those recs were searched from
         + scorecard_html
         + gaps_html
         + coach_html
-        + grove_html        # gamification (RPG progress)
+        + grove_html        # gamification (RPG habit map)
         + recap_html        # 'What you've been working on' — context, at the bottom
         + '<footer>🏛 Generated by <b>Skills Daimon</b> · evidence from your own '
           'Claude Code sessions · nothing left this machine 🔒</footer>'

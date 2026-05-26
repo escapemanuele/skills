@@ -894,7 +894,7 @@ def build_game_state(
         "active_quest": quest,
         "no_quest_reason": (
             None if quest else
-            "No active quest this run. The report did not find a strong enough evidence-backed opportunity."
+            "No mission this run. The report did not find a strong enough evidence-backed opportunity."
         ),
         "badges": badges,
         "badges_mask": badges_mask,
