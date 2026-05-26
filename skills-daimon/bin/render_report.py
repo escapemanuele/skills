@@ -283,8 +283,13 @@ def rec_card(r: dict) -> str:
         f'<span class="rname">{name_html}</span>'
         f'<span class="rjob">{esc(r.get("job", ""))}</span></div>'
         f'<p class="ev"><b>Evidence.</b> {esc(r.get("evidence", ""))}</p>'
-        f'<p class="desc">{esc(r.get("description", ""))}</p>'
-        f'<div class="install">{install}</div>'
+        + (
+            '<details class="rec-desc">'
+            '<summary>What it does</summary>'
+            f'<p class="desc">{esc(r.get("description", ""))}</p>'
+            '</details>' if r.get("description") else ""
+        )
+        + f'<div class="install">{install}</div>'
         '</div>'
     )
 
@@ -508,6 +513,28 @@ CSS = """
 body{margin:0;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   color:%(INK)s;-webkit-font-smoothing:antialiased;background:%(BG)s}
 .wrap{max-width:920px;margin:0 auto;padding:32px 24px 64px}
+/* sidebar nav — fixed left, icon strip; labels slide in on hover */
+.sidebar{position:fixed;top:24px;left:14px;display:flex;flex-direction:column;gap:6px;
+  padding:10px 8px;background:rgba(255,253,248,0.92);
+  border:1px solid #e7d6b6;border-radius:14px;
+  box-shadow:0 2px 10px rgba(124,74,40,0.08);
+  z-index:50;backdrop-filter:saturate(140%%) blur(6px)}
+.snav{display:flex;align-items:center;gap:10px;
+  text-decoration:none;color:%(INK)s;
+  padding:7px 10px;border-radius:10px;
+  font-size:13px;font-weight:600;
+  transition:background .12s,transform .12s}
+.snav:hover{background:#fff4dc;transform:translateX(2px)}
+.snav-ico{font-size:16px;line-height:1;width:18px;text-align:center}
+.snav-lbl{white-space:nowrap;max-width:0;overflow:hidden;opacity:0;
+  transition:max-width .18s ease,opacity .15s ease}
+.sidebar:hover .snav-lbl,.snav:focus .snav-lbl{max-width:160px;opacity:1}
+section{scroll-margin-top:24px}
+@media(max-width:1100px){
+  .sidebar{position:static;flex-direction:row;flex-wrap:wrap;justify-content:center;
+    margin:18px auto 0;max-width:920px;width:fit-content}
+  .snav-lbl{max-width:160px;opacity:1}
+}
 header.hero{background:linear-gradient(135deg,%(ACCENT)s,#7c3aed);color:#fff;
   border-radius:18px;padding:28px 30px;margin-bottom:28px}
 header.hero h1{margin:0 0 4px;font-size:26px;letter-spacing:-.3px}
@@ -539,7 +566,17 @@ h2.sec{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:%(ACCENT
 .rname a{color:%(ACCENT)s;text-decoration:none}
 .rname a:hover{text-decoration:underline}
 .rjob{color:%(MUTED)s;font-size:13px;margin-left:auto}
-.ev{margin:6px 0}.desc{color:#374151;margin:6px 0}
+.ev{margin:6px 0}.desc{color:#374151;margin:6px 0 0}
+details.rec-desc{margin:8px 0 0}
+details.rec-desc>summary{cursor:pointer;list-style:none;outline:none;
+  font-size:13px;font-weight:600;color:%(MUTED)s;
+  padding:4px 0;user-select:none;
+  display:inline-flex;align-items:center;gap:6px}
+details.rec-desc>summary::-webkit-details-marker{display:none}
+details.rec-desc>summary::before{content:"▸";font-size:11px;color:%(MUTED)s;
+  transition:transform .15s}
+details.rec-desc[open]>summary::before{transform:rotate(90deg)}
+details.rec-desc>summary:hover{color:%(INK)s}
 .install{margin-top:10px;display:flex;flex-direction:column;gap:6px}
 code{font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0f172a;color:#e2e8f0;
   padding:7px 11px;border-radius:8px;display:block;overflow-x:auto}
@@ -564,15 +601,22 @@ ul.gaps code{display:inline-block;margin-top:6px}
 .scorecard{padding:6px 20px}
 details.scrow{border-bottom:1px solid #f1f2f5}
 details.scrow:last-child{border-bottom:0}
-details.scrow summary{display:flex;align-items:center;gap:12px;padding:14px 0;cursor:pointer;
+details.scrow summary{display:grid;
+  grid-template-columns:18px minmax(0,1fr) 180px 90px 120px;
+  align-items:center;gap:14px;padding:14px 0;cursor:pointer;
   list-style:none;outline:none}
 details.scrow summary::-webkit-details-marker{display:none}
-.scchev{color:%(MUTED)s;font-size:12px;transition:transform .15s;flex-shrink:0}
+.scchev{color:%(MUTED)s;font-size:12px;transition:transform .15s;justify-self:start}
 details.scrow[open] .scchev{transform:rotate(90deg)}
-.scmain{flex:1;min-width:0}
-.sclabel{font-weight:600;font-size:15px}
-.scval{font-variant-numeric:tabular-nums;font-weight:700;font-size:15px;white-space:nowrap;color:%(MUTED)s}
-.scspark{color:%(ACCENT)s;opacity:.85;flex-shrink:0;min-width:72px;text-align:right}
+.scmain{min-width:0}
+.sclabel{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.scval{font-variant-numeric:tabular-nums;font-weight:700;font-size:15px;white-space:nowrap;color:%(MUTED)s;text-align:right}
+.scspark{color:%(ACCENT)s;opacity:.85;text-align:right;line-height:0}
+@media(max-width:680px){
+  details.scrow summary{grid-template-columns:18px minmax(0,1fr) auto;row-gap:6px;column-gap:10px}
+  .scval{grid-column:2/4;text-align:left}
+  .scspark{display:none}
+}
 .delta{font-size:12px;font-weight:600;margin-left:6px}
 /* legacy direction-only (kept for back-compat with payloads that don't declare direction) */
 .delta.up{color:%(BAD)s}
@@ -582,7 +626,7 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .delta.bad{color:%(BAD)s}
 .sline.good{color:%(GOOD)s}
 .sline.bad{color:%(BAD)s}
-.scrow .verdict{margin:0;flex-shrink:0}
+.scrow .verdict{margin:0;justify-self:end}
 .scbody{padding:0 0 16px 24px;color:#374151;font-size:13.5px;line-height:1.55}
 .scexplain{margin-top:8px;padding:10px 12px;background:#f7f8fb;border-radius:8px;color:%(INK)s}
 .verdict{text-align:center;font-size:12.5px;font-weight:600;margin:12px auto 0;
@@ -1004,7 +1048,7 @@ def render(payload: dict) -> str:
 
     scorecard_html = (
         '<h2 class="sec">🩺 Workflow signals</h2>'
-        '<p class="seclead">How you\'re working, scored where there\'s a clear better way. Good · Watch · Needs action · No data.</p>'
+        '<p class="seclead">How you\'re working, scored where there\'s a clear better way.</p>'
         + scorecard_strip(scorecard, history_by_key)
         if scorecard else ""
     )
@@ -1029,22 +1073,47 @@ def render(payload: dict) -> str:
         if coaching else ""
     )
 
+    # Sidebar — only entries whose section actually rendered show up.
+    nav_items = [
+        ("hero",     "🏛", "Verdict",       hero_html or arch_html),
+        ("action",   "🎯", "Next action",   pa_html),
+        ("mission",  "⚔",  "Mission",       quest_html),
+        ("recs",     "✨", "Recommendations", recs_html),
+        ("signals",  "🩺", "Signals",       scorecard_html),
+        ("coaching", "⚑",  "Coaching",      coach_html),
+        ("gaps",     "🛠",  "Build",         gaps_html),
+        ("grove",    "🌲", "Grove",         grove_html),
+        ("recap",    "🧭", "What you did",  recap_html),
+    ]
+    sidebar_html = (
+        '<aside class="sidebar" aria-label="Jump to section">'
+        + "".join(
+            f'<a class="snav" href="#sec-{slug}" title="{label}">'
+            f'<span class="snav-ico" aria-hidden="true">{ico}</span>'
+            f'<span class="snav-lbl">{label}</span></a>'
+            for slug, ico, label, present in nav_items if present
+        )
+        + '</aside>'
+    )
+
+    def _sec(slug: str, html_block: str) -> str:
+        return f'<section id="sec-{slug}">{html_block}</section>' if html_block else ""
+
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         "<title>Skills Daimon</title><style>" + CSS + "</style></head><body>"
-        '<div class="wrap">'
-        + hero_html
-        + arch_html
-        + pa_html
-        + quest_html        # one active mission, right after the primary action
-        + recs_html         # catalog-backed recommendations
-        + catalog_strip     # provenance: where those recs were searched from
-        + scorecard_html
-        + gaps_html
-        + coach_html
-        + grove_html        # gamification (RPG habit map)
-        + recap_html        # 'What you've been working on' — context, at the bottom
+        + sidebar_html
+        + '<div class="wrap">'
+        + _sec("hero",     (hero_html or "") + (arch_html or ""))
+        + _sec("action",   pa_html)
+        + _sec("mission",  quest_html)
+        + _sec("recs",     recs_html + catalog_strip)
+        + _sec("signals",  scorecard_html)
+        + _sec("gaps",     gaps_html)
+        + _sec("coaching", coach_html)
+        + _sec("grove",    grove_html)
+        + _sec("recap",    recap_html)
         + '<footer>🏛 Generated by <b>Skills Daimon</b> · evidence from your own '
           'Claude Code sessions · nothing left this machine 🔒</footer>'
         "</div></body></html>"
