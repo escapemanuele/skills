@@ -137,8 +137,47 @@ def _fmt_num(v):
     return str(v)
 
 
-def sparkline(values, w=72, h=18) -> str:
-    """Inline-SVG sparkline. Requires ≥3 distinct points or returns empty."""
+# Default direction-of-goodness per known history_key. Higher value = better,
+# or lower value = better. Used to color deltas / sparklines correctly.
+HIGHER_BETTER_KEYS = {"outcome_finished_pct", "memory_rate_pct"}
+LOWER_BETTER_KEYS = {
+    "risky_git_count", "search_shell_pct", "bash_error_pct",
+    "claudemd_missing", "unsaved_prompts",
+}
+
+
+def _direction_for(item: dict) -> str | None:
+    """Return 'higher_better' / 'lower_better' / None for a scorecard item."""
+    d = (item.get("direction") or "").strip().lower()
+    if d in ("higher_better", "lower_better"):
+        return d
+    key = item.get("history_key")
+    if key in HIGHER_BETTER_KEYS:
+        return "higher_better"
+    if key in LOWER_BETTER_KEYS:
+        return "lower_better"
+    return None
+
+
+def _trend_class(current, prior, direction: str | None) -> str:
+    """'good' if movement is in the better direction, 'bad' otherwise, '' if neutral."""
+    if direction is None or current is None or prior is None:
+        return ""
+    try:
+        if current == prior:
+            return ""
+        better = (current > prior) if direction == "higher_better" else (current < prior)
+    except TypeError:
+        return ""
+    return "good" if better else "bad"
+
+
+def sparkline(values, w=72, h=18, trend_class: str = "") -> str:
+    """Inline-SVG sparkline. Requires ≥3 distinct points or returns empty.
+
+    `trend_class` ('good'/'bad'/'') styles the stroke via CSS so the line color
+    reflects whether the metric is heading the right way.
+    """
     if not values or len(values) < 3:
         return ""
     lo, hi = min(values), max(values)
@@ -150,15 +189,17 @@ def sparkline(values, w=72, h=18) -> str:
         y = h - 2 - (v - lo) * (h - 4) / rng
         pts.append(f"{x:.1f},{y:.1f}")
     poly = " ".join(pts)
+    cls = f"sline {trend_class}".strip()
     return (
-        f'<svg class="sline" viewBox="0 0 {w} {h}" width="{w}" height="{h}" '
+        f'<svg class="{cls}" viewBox="0 0 {w} {h}" width="{w}" height="{h}" '
         f'role="img"><polyline fill="none" stroke="currentColor" '
         f'stroke-width="1.5" points="{poly}"/></svg>'
     )
 
 
-def _delta_html(values: list, current) -> str:
-    """\"up from 10\" delta vs the most recent distinct prior value."""
+def _delta_html(values: list, current, direction: str | None = None) -> str:
+    """\"↑ from 10\" delta. Color reflects whether the movement is in the
+    metric's better direction (good/bad), not just the arrow direction."""
     if not values or current is None:
         return ""
     prior = None
@@ -172,7 +213,11 @@ def _delta_html(values: list, current) -> str:
         arrow = "↑" if current > prior else "↓"
     except TypeError:
         return ""
-    cls = "up" if current > prior else "down"
+    cls = _trend_class(current, prior, direction)
+    if not cls:
+        # Fall back to direction-only color (legacy behavior) when caller
+        # has not declared a direction.
+        cls = "up" if current > prior else "down"
     return f' <span class="delta {cls}">{arrow} from {_fmt_num(prior)}</span>'
 
 
@@ -196,9 +241,16 @@ def scorecard_strip(items: list, history_by_key: dict | None = None) -> str:
         # Trend bits (only when history has the key)
         key = it.get("history_key")
         series = history_by_key.get(key) if key else None
-        spark = sparkline(series) if series else ""
         cur = it.get("current_number")
-        delta = _delta_html(series, cur) if series and cur is not None else ""
+        direction = _direction_for(it)
+        # Compute the "is this trending the right way?" class once; reuse it
+        # for both the sparkline stroke and the delta chip.
+        trend_cls = ""
+        if series and cur is not None:
+            prior = next((v for v in reversed(series[:-1]) if v != cur and v is not None), None)
+            trend_cls = _trend_class(cur, prior, direction)
+        spark = sparkline(series, trend_class=trend_cls) if series else ""
+        delta = _delta_html(series, cur, direction) if series and cur is not None else ""
         rows.append(
             '<details class="scrow">'
             '<summary>'
@@ -479,8 +531,14 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .scval{font-variant-numeric:tabular-nums;font-weight:700;font-size:15px;white-space:nowrap;color:%(MUTED)s}
 .scspark{color:%(ACCENT)s;opacity:.85;flex-shrink:0;min-width:72px;text-align:right}
 .delta{font-size:12px;font-weight:600;margin-left:6px}
+/* legacy direction-only (kept for back-compat with payloads that don't declare direction) */
 .delta.up{color:%(BAD)s}
 .delta.down{color:%(GOOD)s}
+/* direction-of-goodness (preferred) */
+.delta.good{color:%(GOOD)s}
+.delta.bad{color:%(BAD)s}
+.sline.good{color:%(GOOD)s}
+.sline.bad{color:%(BAD)s}
 .scrow .verdict{margin:0;flex-shrink:0}
 .scbody{padding:0 0 16px 24px;color:#374151;font-size:13.5px;line-height:1.55}
 .scexplain{margin-top:8px;padding:10px 12px;background:#f7f8fb;border-radius:8px;color:%(INK)s}
@@ -525,12 +583,15 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .trust .trust-title{font-size:15px;margin:0 0 8px;color:%(INK)s}
 .trust-list{margin:0;padding:0 0 0 18px;color:#374151;font-size:13.5px;line-height:1.55}
 .trust-list li{margin:4px 0}
-/* daimon level chip (inside archetype card) */
-.daimon-chip{display:inline-flex;align-items:center;gap:6px;float:right;
+/* daimon level chip (top-right of archetype card; absolute so it never
+   collides with the archetype label on narrow screens) */
+.archetype-card{position:relative}
+.daimon-chip{position:absolute;top:14px;right:18px;display:inline-flex;align-items:center;gap:6px;
   background:%(ACCENT_SOFT)s;color:%(ACCENT)s;border:1px solid %(GAP)s;
   border-radius:999px;padding:4px 10px;font-size:12px;font-weight:600}
 .daimon-chip .dc-val{font-size:14px;font-weight:800;margin:0 2px}
 .daimon-chip .dc-xp{opacity:.75;font-weight:500}
+@media(max-width:520px){.daimon-chip{position:static;display:inline-flex;margin:0 0 10px}}
 /* quest card */
 .quest{border:1px solid #d7bc92;background:#fff8e7;position:relative}
 .quest:before{content:"Quest Log";position:absolute;top:-11px;left:18px;background:#fff8e7;color:#8A5B21;
@@ -559,7 +620,7 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .grove-stat b{display:block;font-size:18px;line-height:1;color:#2F271F;font-variant-numeric:tabular-nums}
 .grove-stat span{display:block;margin-top:4px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#7B6A58}
 .grove-progress{margin-top:12px;background:#ead6b5;border-radius:999px;height:12px;overflow:hidden;border:1px solid #d7bc92}
-.grove-progress span{display:block;height:100%%;background:#0F766E;border-radius:999px}
+.grove-progress span{display:block;height:100%%;min-width:8px;background:#0F766E;border-radius:999px}
 .grove-body{padding:16px 18px 18px}
 .grove-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:start;margin-bottom:14px}
 .grove-summary-main{font-size:16px;color:#374151}
@@ -767,7 +828,7 @@ def _gamify_blocks(payload: dict, m: dict):
         '</div>'
         '<div class="grove-stats">'
         f'<div class="grove-stat"><b>{xp_total}</b><span>Total XP</span></div>'
-        f'<div class="grove-stat"><b>+{delta_total}</b><span>Verified this run</span></div>'
+        f'<div class="grove-stat"><b>+{delta_total}</b><span>XP earned this run</span></div>'
         f'<div class="grove-stat"><b>{earned}</b><span>Relics</span></div>'
         '</div>'
         '</div>'
@@ -792,7 +853,7 @@ def _gamify_blocks(payload: dict, m: dict):
         f'<tbody>{"".join(track_rows)}</tbody></table>'
         '</details>'
         f'<p class="grove-cap">Relics earned: {earned} · Quests verified: {int(gs.get("quests_completed_count",0))} · '
-        f'Habit signals stored as numbers only: {rhythm_count}</p>'
+        f'{rhythm_count} numeric signals saved · no commands, paths, or session IDs</p>'
         '</div>'
         '</div>'
     )
@@ -847,7 +908,7 @@ def render(payload: dict) -> str:
     )
     catalog_strip = (
         '<section class="srcstrip card">'
-        '<div class="srclabel-dark">Skill sources searched <span>— marketplaces &amp; registries</span></div>'
+        '<div class="srclabel-dark">Skill sources searched <span>— marketplaces, registries &amp; MCP catalogs</span></div>'
         f'<div class="badges">{badges}</div>'
         '</section>'
     ) if badges else ""
@@ -907,14 +968,14 @@ def render(payload: dict) -> str:
         + hero_html
         + arch_html
         + pa_html
-        + grove_html        # compact gamification, after core diagnosis/action
-        + quest_html        # one active quest or explicit no-quest explanation
+        + quest_html        # one active quest, right after the primary action (charter §)
         + catalog_strip
-        + recs_html         # catalog-backed recommendations, still above evidence details
+        + recs_html         # catalog-backed recommendations
         + recap_html
         + scorecard_html
         + gaps_html
         + coach_html
+        + grove_html        # gamification (RPG progress), down near history/coaching
         + '<footer>🏛 Generated by <b>Skills Daimon</b> · evidence from your own '
           'Claude Code sessions · nothing left this machine 🔒</footer>'
         "</div></body></html>"
