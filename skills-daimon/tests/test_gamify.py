@@ -461,7 +461,7 @@ class TestDisplayPolish(unittest.TestCase):
         html = _render_with_history(payload, _history())
         self.assertIn("Daimon Grove · Level", html)
         self.assertIn("RPG progress, evidence locked", html)
-        self.assertIn("Daimon Grove Realm Map", html)
+        self.assertIn("Daimon Grove Adventure Map", html)
         self.assertIn("Evidence ledger", html)
         self.assertIn("Quest Log", html)
         self.assertIn("XP verified this run", html)

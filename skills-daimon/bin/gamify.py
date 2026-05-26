@@ -787,9 +787,9 @@ def build_grove_summary(game_state: dict) -> dict:
 
     quest = gs.get("active_quest")
     if quest:
-        next_quest = f"Next quest: {quest.get('title', '')}."
+        next_quest = f"Next mission: {quest.get('title', '')}."
     else:
-        next_quest = "No active quest this run. The report did not find a strong enough evidence-backed opportunity."
+        next_quest = "No mission this run. The report did not find a strong enough evidence-backed opportunity."
 
     return {
         "xp_delta_total": sum(_safe_int((tracks.get(t) or {}).get("delta")) for t in TRACKS),
@@ -1057,9 +1057,9 @@ def render_grove_svg(grove: dict, *, width: int = 900, height: int = 320) -> str
 
     return (
         f'<svg viewBox="0 0 {width} {height}" width="100%" preserveAspectRatio="xMinYMin meet" '
-        f'role="img" aria-label="Daimon Grove realm map">'
+        f'role="img" aria-label="Daimon Grove adventure map">'
         f'<title>Daimon Grove</title>'
-        f'<desc>RPG-style realm map with six craft sites: Command Tree, Memory Well, Git Thorns, '
+        f'<desc>RPG-style adventure map with six craft sites: Command Tree, Memory Well, Git Thorns, '
         f'Planning Path, Tool Shrine, and Repo Signpost. Site level follows verified evidence.</desc>'
         f'<rect x="0" y="0" width="{width}" height="{height}" rx="22" fill="#FFF8E7"/>'
         f'<path d="M 0 255 C 130 225, 190 286, 330 248 S 590 224, 900 258 V 320 H 0 Z" fill="#E7F6DC"/>'
@@ -1070,8 +1070,8 @@ def render_grove_svg(grove: dict, *, width: int = 900, height: int = 320) -> str
         f'<path d="M 38 280 C 136 230, 192 172, 260 126 S 352 146, 420 216 S 500 165, 560 116 '
         f'S 650 162, 708 208 S 770 158, 810 116" fill="none" stroke="#7C4A28" stroke-width="3" '
         f'stroke-linecap="round" stroke-dasharray="8 10" opacity="0.55"/>'
-        f'<text x="34" y="38" font-size="18" font-weight="800" fill="{ink}" font-family="-apple-system,sans-serif">Daimon Grove Realm Map</text>'
-        f'<text x="34" y="58" font-size="12" fill="{muted}" font-family="-apple-system,sans-serif">Sites grow only from verified craft improvements.</text>'
+        f'<text x="34" y="38" font-size="18" font-weight="800" fill="{ink}" font-family="-apple-system,sans-serif">Daimon Grove Adventure Map</text>'
+        f'<text x="34" y="58" font-size="12" fill="{muted}" font-family="-apple-system,sans-serif">Each landmark is a habit area. It changes only when evidence proves improvement.</text>'
         + "".join(stars)
         + "".join(glyphs)
         + '</svg>'

@@ -371,30 +371,73 @@ def gap_item(g: dict) -> str:
     )
 
 
-def hero_verdict_card(verdict: dict, meta: dict) -> str:
-    """The hero: named verdict, summary, evidence chips, next move."""
-    if not verdict or not verdict.get("name"):
+def hero_card(verdict: dict, archetype: dict, meta: dict,
+              level_chip_inner: str = "") -> str:
+    """Combined hero: archetype + verdict + Daimon Level + evidence chips +
+    expandable archetype details. Replaces the previous separate hero+archetype
+    cards so the top of the report is one block instead of two."""
+    verdict = verdict or {}
+    archetype = archetype or {}
+    if not verdict.get("name") and not archetype.get("title"):
         return ""
+
+    days = esc(meta.get("days", "14"))
+    date = esc(meta.get("date", ""))
     chips = "".join(
         f'<span class="chip">{esc(c)}</span>' for c in (verdict.get("evidence_chips") or [])
     )
-    next_phrase = (verdict.get("next_phrase") or "").strip()
-    next_html = (
-        f'<div class="hv-next"><span class="hv-next-label">Next move</span>'
-        f'<code class="hv-phrase">{esc(next_phrase)}</code></div>'
-        if next_phrase else ""
-    )
-    days = esc(meta.get("days", "14"))
-    date = esc(meta.get("date", ""))
+    # Archetype identity (no separate card)
+    arch_title = esc(archetype.get("title", ""))
+    arch_tag = esc(archetype.get("tagline", ""))
+    # Verdict name + summary
+    v_name = esc(verdict.get("name", ""))
+    v_sum = esc(verdict.get("summary", ""))
+
+    # Expandable details: why/strength/watch-out/next ritual — collapsed by
+    # default so the top stays calm.
+    detail_rows = []
+    for label, key in (("Why this title", "why"), ("Strength", "strength"),
+                       ("Watch-out", "watch_out"), ("Next ritual", "next_ritual")):
+        val = (archetype.get(key) or "").strip()
+        if val:
+            detail_rows.append(
+                f'<dt class="arch-dt">{label}</dt><dd class="arch-dd">{esc(val)}</dd>'
+            )
+    details_html = (
+        '<details class="hero-details">'
+        '<summary>About this archetype</summary>'
+        f'<dl class="arch-dl">{"".join(detail_rows)}</dl>'
+        '</details>'
+    ) if detail_rows else ""
+
+    # Daimon Level chip: accept either inner HTML (legacy) or a full
+    # <div class="daimon-chip">…</div> block (current renderer).
+    chip_html = ""
+    if level_chip_inner:
+        chip_html = (level_chip_inner
+                     if 'class="daimon-chip"' in level_chip_inner
+                     else f'<div class="daimon-chip" title="Daimon Level">{level_chip_inner}</div>')
+
     return (
-        '<section class="hero-verdict">'
+        '<section class="hero-card">'
         f'<div class="hv-sub">Skills Daimon · Last {days} days · generated {date}</div>'
-        f'<h1 class="hv-name">{esc(verdict.get("name"))}</h1>'
-        f'<p class="hv-summary">{esc(verdict.get("summary", ""))}</p>'
+        f'{chip_html}'
+        f'<h1 class="hero-arch-title">{arch_title}</h1>'
+        f'<p class="hero-arch-tag">{arch_tag}</p>'
+        '<div class="hero-verdict-row">'
+        f'<span class="hero-verdict-label">Verdict</span>'
+        f'<span class="hero-verdict-name">{v_name}</span>'
+        '</div>'
+        f'<p class="hero-summary">{v_sum}</p>'
         f'<div class="hv-chips">{chips}</div>'
-        f'{next_html}'
+        f'{details_html}'
         '</section>'
     )
+
+
+# Back-compat shims — kept so any external caller still works.
+def hero_verdict_card(verdict: dict, meta: dict) -> str:
+    return hero_card(verdict, {}, meta, "")
 
 
 def primary_action_card(a: dict) -> str:
@@ -548,20 +591,35 @@ details.scrow[open] .scchev{transform:rotate(90deg)}
 .verdict.watch{background:#FFFBEB;color:%(WATCH)s}
 .verdict.bad{background:#FEF2F2;color:%(BAD)s}
 .verdict.nodata{background:#F3F4F6;color:%(MUTED)s}
-/* hero verdict */
-.hero-verdict{background:linear-gradient(135deg,%(ACCENT)s,#7c3aed);color:#fff;
-  border-radius:20px;padding:30px 32px;margin-bottom:20px;box-shadow:0 8px 28px rgba(109,40,217,.18)}
+/* combined hero (archetype + verdict in one card) */
+.hero-card{position:relative;background:linear-gradient(135deg,%(ACCENT)s,#7c3aed);color:#fff;
+  border-radius:20px;padding:28px 32px;margin-bottom:20px;box-shadow:0 8px 28px rgba(109,40,217,.18)}
 .hv-sub{font-size:12px;text-transform:uppercase;letter-spacing:.8px;opacity:.85;margin-bottom:10px}
-.hv-name{margin:0 0 10px;font-size:34px;font-weight:800;letter-spacing:-.5px;line-height:1.1}
-.hv-summary{margin:0 0 14px;font-size:16px;line-height:1.45;opacity:.95;max-width:60ch}
-.hv-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.hero-arch-title{margin:0 0 4px;font-size:30px;font-weight:800;letter-spacing:-.3px;line-height:1.1}
+.hero-arch-tag{margin:0 0 14px;font-size:14px;opacity:.9;font-style:italic;max-width:60ch}
+.hero-verdict-row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.hero-verdict-label{font-size:11px;text-transform:uppercase;letter-spacing:.8px;opacity:.85}
+.hero-verdict-name{font-size:22px;font-weight:800;letter-spacing:-.2px}
+.hero-summary{margin:0 0 12px;font-size:15.5px;line-height:1.45;opacity:.95;max-width:60ch}
+.hv-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
 .chip{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);
   padding:4px 10px;border-radius:999px;font-size:12px;font-variant-numeric:tabular-nums}
-.hv-next{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  padding:12px 14px;background:rgba(255,255,255,.13);border-radius:12px}
-.hv-next-label{font-size:11px;text-transform:uppercase;letter-spacing:.8px;opacity:.85}
-.hv-phrase{display:inline-block;background:#0f172a;color:#fff;padding:7px 11px;
-  border-radius:8px;font:13.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+/* Daimon chip inside the hero (overrides the archetype-card placement) */
+.hero-card .daimon-chip{position:absolute;top:18px;right:20px;background:rgba(255,255,255,.18);
+  color:#fff;border-color:rgba(255,255,255,.28)}
+/* Expandable archetype details, kept calm */
+.hero-details{margin-top:6px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);
+  border-radius:12px;padding:6px 14px}
+.hero-details summary{cursor:pointer;font-size:12.5px;font-weight:700;letter-spacing:.4px;
+  text-transform:uppercase;opacity:.92;padding:8px 0;list-style:none}
+.hero-details summary::-webkit-details-marker{display:none}
+.hero-details summary:before{content:"▸ ";display:inline-block;margin-right:4px;transition:transform .15s}
+.hero-details[open] summary:before{content:"▾ "}
+.hero-details .arch-dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;
+  margin:6px 0 12px;font-size:13.5px;line-height:1.5}
+.hero-details .arch-dt{font-weight:700;color:#FDE68A}
+.hero-details .arch-dd{margin:0;color:#fff;opacity:.92}
+@media(max-width:520px){.hero-card .daimon-chip{position:static;display:inline-flex;margin:0 0 12px}}
 /* primary action */
 .primary-action{border-left:5px solid %(ACCENT)s}
 .pa-tag{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:%(ACCENT)s;
@@ -871,33 +929,25 @@ def render(payload: dict) -> str:
 
     level_chip_html, quest_html, grove_html = _gamify_blocks(payload, m)
 
-    # ─── HERO VERDICT (replaces the old hero/title) ────────────────────────
-    hero_html = hero_verdict_card(payload.get("verdict") or {}, m)
-    # If no verdict was provided (payload missing it) fall back to a tiny
-    # title bar so the report still has a top.
+    # ─── COMBINED HERO (verdict + archetype + Daimon Level in one card) ───
+    hero_html = hero_card(
+        payload.get("verdict") or {},
+        payload.get("archetype") or {},
+        m,
+        level_chip_html or "",
+    )
     if not hero_html:
         date = esc(m.get("date", ""))
         days = esc(m.get("days", 14))
         hero_html = (
-            '<section class="hero-verdict">'
+            '<section class="hero-card">'
             '<div class="hv-sub">Skills Daimon · Last '
             f'{days} days · generated {date}</div>'
-            '<h1 class="hv-name">Snapshot</h1>'
-            '<p class="hv-summary">No verdict supplied; showing the underlying signals below.</p>'
+            '<h1 class="hero-arch-title">Snapshot</h1>'
+            '<p class="hero-summary">No verdict supplied; showing the underlying signals below.</p>'
             '</section>'
         )
-
-    # ─── ARCHETYPE CARD (5-part) + Daimon Level chip ───────────────────────
-    arch_inner = archetype_card(payload.get("archetype") or {})
-    if arch_inner and level_chip_html:
-        # Inject the level chip right after the opening section tag.
-        arch_html = arch_inner.replace(
-            '<section class="archetype-card card">',
-            '<section class="archetype-card card">' + level_chip_html,
-            1,
-        )
-    else:
-        arch_html = arch_inner
+    arch_html = ""  # merged into hero_html; kept for assembly compatibility
 
     # ─── PRIMARY ACTION CARD ───────────────────────────────────────────────
     pa_html = primary_action_card(payload.get("primary_action") or {})
