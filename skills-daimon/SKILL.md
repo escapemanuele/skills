@@ -20,6 +20,7 @@ set). Map the user's `--compact|--normal|--full` flag to scan's `--budget`
 
 - Never invent a skill, plugin, agent, source URL, or install command.
 - Every recommendation must come from a catalog hit.
+- Aim for **at least 3** recommendations: widen job terms and re-query every source (incl. live `npx skills find` + `ai-skills`) before settling. If <3 real hits genuinely exist, show what's real and say so — never pad.
 - Every coaching claim must cite a hard count from the scan.
 - Do not install anything. Print install commands only.
 - If no sessions exist, say there is no recent data.
@@ -32,7 +33,7 @@ set). Map the user's `--compact|--normal|--full` flag to scan's `--budget`
    - **GATE B:** if `available_catalogs` is empty → emit zero catalog-backed recs (coaching may still run).
 2. **Analyze** — `python3 ${CLAUDE_SKILL_DIR}/bin/analyze.py <scan.json>` computes the verdict, archetype, primary action, scorecard, coaching, history snapshot, and a markdown skeleton deterministically (all rates carry denominators; outcome rates use `outcomes.coverage.labeled`). Its `recommendations`/`gaps` are empty by design — you fill those from live catalog hits in step 3. See `references/analysis.md` to verify or reason by hand.
 3. **Recommend** — cluster 3–5 jobs, query *every* `available_catalogs` entry, pick one catalog-backed winner per job. Unmatched jobs → "Worth building yourself".
-4. **Render HTML** — `python3 ${CLAUDE_SKILL_DIR}/bin/render_report.py <payload.json>`; link the printed `url` at the top of the report.
+4. **Render HTML** — `python3 ${CLAUDE_SKILL_DIR}/bin/render_report.py <payload.json>`; link the printed `url` at the top of the report. The HTML opens in a **simplified view** (Primary action · Recommendations · Coaching · Daimon Grove) with a button to toggle to the **advanced** full report.
 5. **Append history** — `python3 ${CLAUDE_SKILL_DIR}/bin/history.py append < <snapshot.json>` (numeric-only).
 6. **Print** the markdown report with the visual report URL.
 

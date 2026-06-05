@@ -913,6 +913,43 @@ ACTIVE_SECTION_JS = """
 """
 
 
+# Simplified-first view: extra styles + the Simple/Advanced toggle script.
+SIMPLE_CSS = """
+.simpleview{max-width:760px;margin:0 auto;padding:30px 20px 64px}
+.simple-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+.simple-title{font-size:20px;font-weight:700;color:#171717}
+.simple-title span{color:#6B7280;font-weight:400;font-size:15px}
+.viewtoggle{background:#6D28D9;color:#fff;border:0;border-radius:999px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.viewtoggle:hover{background:#5b21b6}
+.simpleview .card{margin:0 0 14px}
+.simpleview .sec{font-size:16px;margin:22px 0 10px}
+.simple-pa{border-left:4px solid #6D28D9}
+.simple-pa .pa-why{color:#374151;margin-top:8px}
+.simple-rec .srhead{display:flex;align-items:center;gap:8px;margin-bottom:2px;flex-wrap:wrap}
+.simple-rec .srline{color:#374151;font-size:14px;margin:4px 0 8px}
+.simple-rec .srinstall{display:block;background:#F3F4F6;padding:8px 10px;border-radius:6px;font-size:12.5px;color:#334155;overflow-x:auto}
+.simple-coach h4{margin:0 0 6px}
+.simple-coach .scbetter{color:#171717;margin:0 0 4px}
+.simple-coach .scsaw{color:#6B7280;font-size:13px;margin:0}
+.simple-note{color:#6B7280;font-size:13px;margin:0 0 10px}
+.simple-foot{text-align:center;color:#9CA3AF;font-size:12px;margin-top:26px}
+#view-advanced .viewbar{margin:0 0 16px}
+"""
+
+VIEW_TOGGLE_JS = """
+<script>
+function sdToggleView(){
+  var s=document.getElementById('view-simple'),a=document.getElementById('view-advanced');
+  if(!s||!a)return;
+  var advHidden=getComputedStyle(a).display==='none';
+  a.style.display=advHidden?'block':'none';
+  s.style.display=advHidden?'none':'block';
+  window.scrollTo(0,0);
+}
+</script>
+"""
+
+
 def _gamify_blocks(payload: dict, m: dict):
     """Return (level_chip_html, quest_card_html, grove_section_html) — empty
     strings if gamification is unavailable. Pulls fresh history so deltas
@@ -1088,6 +1125,95 @@ def _gamify_blocks(payload: dict, m: dict):
     return level_chip, quest_html, grove_html
 
 
+def simple_primary_action_card(a: dict) -> str:
+    """Stripped-down primary action for the simple view (no Source line)."""
+    if not a or not a.get("title"):
+        return ""
+    phrase = (a.get("phrase") or "").strip()
+    phrase_html = f'<code class="pa-phrase">{esc(phrase)}</code>' if phrase else ""
+    return (
+        '<section class="primary-action card simple-pa">'
+        '<div class="pa-tag">🎯 Do this next</div>'
+        f'<h2 class="pa-title">{esc(a.get("title"))}</h2>'
+        f'{phrase_html}'
+        f'<p class="pa-why">{esc(a.get("why", ""))}</p>'
+        '</section>'
+    )
+
+
+def simple_recs_block(recs: list) -> str:
+    """Recommendations, trimmed: dot · type · name · one line · install only."""
+    if not recs:
+        return (
+            '<section><h2 class="sec">✨ Recommended for you</h2>'
+            '<div class="card"><p class="simple-note">No catalog-backed recommendation '
+            'for this run yet.</p></div></section>'
+        )
+    cards = []
+    for r in recs:
+        conf = r.get("confidence", "med")
+        dots = CONF_DOTS.get(conf, CONF_DOTS["med"])
+        color = CONF.get(conf, CONF["med"])
+        name = esc(r.get("name", "?"))
+        url = r.get("source_url")
+        name_html = f'<a href="{esc(url)}">{name}</a>' if url else name
+        line = esc((r.get("description") or r.get("job") or "")[:110])
+        install = (r.get("install") or [""])[0]
+        install_html = f'<code class="srinstall">{esc(install)}</code>' if install else ""
+        cards.append(
+            '<div class="card simple-rec">'
+            f'<div class="srhead"><span class="dots" style="color:{color}">{dots}</span>'
+            f'<span class="rtype">{esc(r.get("type", "skill"))}</span>'
+            f'<span class="rname">{name_html}</span></div>'
+            f'<p class="srline">{line}</p>'
+            f'{install_html}'
+            '</div>'
+        )
+    note = ""
+    if len(recs) < 3:
+        plural = "" if len(recs) == 1 else "es"
+        note = (
+            f'<p class="simple-note">Only {len(recs)} catalog-backed match{plural} '
+            'genuinely fit your usage — nothing was invented to pad the list.</p>'
+        )
+    return '<section><h2 class="sec">✨ Recommended for you</h2>' + note + "".join(cards) + '</section>'
+
+
+def simple_coach_block(coaching: list) -> str:
+    """Coaching, trimmed to the action plus the evidence one-liner."""
+    if not coaching:
+        return ""
+    cards = []
+    for c in coaching:
+        cards.append(
+            '<div class="card simple-coach">'
+            f'<h4>{esc(c.get("title", ""))}</h4>'
+            f'<p class="scbetter"><b>Try this.</b> {esc(c.get("better", ""))}</p>'
+            f'<p class="scsaw">{esc(c.get("evidence", ""))}</p>'
+            '</div>'
+        )
+    return '<section><h2 class="sec">⚑ Habits to tweak</h2>' + "".join(cards) + '</section>'
+
+
+def simple_view(payload: dict, m: dict, grove_html: str) -> str:
+    """The default, easy-to-scan view: Primary action · Recommendations ·
+    Coaching · Daimon Grove, with a button to switch to the advanced report."""
+    days = esc(m.get("days", 28))
+    pa = simple_primary_action_card(payload.get("primary_action") or {})
+    recs = simple_recs_block(payload.get("recommendations") or [])
+    coach = simple_coach_block(payload.get("coaching") or [])
+    return (
+        '<div id="view-simple" class="simpleview">'
+        '<div class="simple-top">'
+        f'<div class="simple-title">🏛 Skills Daimon <span>· last {days} days</span></div>'
+        '<button class="viewtoggle" id="view-toggle" onclick="sdToggleView()">Advanced view →</button>'
+        '</div>'
+        + pa + recs + coach + (grove_html or "")
+        + '<div class="simple-foot">🔒 Local only · evidence from your own sessions · nothing left this machine</div>'
+        '</div>'
+    )
+
+
 def render(payload: dict) -> str:
     m = payload.get("meta", {})
     recs = payload.get("recommendations", [])
@@ -1239,12 +1365,14 @@ def render(payload: dict) -> str:
     def _sec(slug: str, html_block: str) -> str:
         return f'<section id="sec-{slug}">{html_block}</section>' if html_block else ""
 
-    return (
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>Skills Daimon</title><style>" + CSS + "</style></head><body>"
+    # Simple view (default) — easy to scan; Advanced view (hidden) is the full
+    # report. A button on each toggles between them. One self-contained file.
+    simple_html = simple_view(payload, m, grove_html)
+    advanced_html = (
+        '<div id="view-advanced" style="display:none">'
         + sidebar_html
         + '<div class="wrap">'
+        + '<div class="viewbar"><button class="viewtoggle" onclick="sdToggleView()">← Simple view</button></div>'
         + _sec("hero",     (hero_html or "") + (arch_html or ""))
         + _sec("action",   pa_html)
         + _sec("mission",  quest_html)
@@ -1258,7 +1386,16 @@ def render(payload: dict) -> str:
         + _sec("horizon",  horizon_html)
         + '<footer>🏛 Generated by <b>Skills Daimon</b> · evidence from your own '
           'Claude Code sessions · nothing left this machine 🔒</footer>'
-        "</div>" + ACTIVE_SECTION_JS + "</body></html>"
+        + "</div></div>"
+    )
+
+    return (
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>Skills Daimon</title><style>" + CSS + SIMPLE_CSS + "</style></head><body>"
+        + simple_html
+        + advanced_html
+        + ACTIVE_SECTION_JS + VIEW_TOGGLE_JS + "</body></html>"
     )
 
 

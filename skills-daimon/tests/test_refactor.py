@@ -26,6 +26,7 @@ import analyze            # noqa: E402
 import catalog_search     # noqa: E402
 import history as history_mod  # noqa: E402
 import redact             # noqa: E402
+import render_report      # noqa: E402
 import scan               # noqa: E402
 
 
@@ -298,6 +299,51 @@ class TestNoRawCommandsInHistory(unittest.TestCase):
         self.assertNotIn("secret", blob)
         self.assertNotIn("command_hash", blob)
         self.assertNotIn("command_summary", blob)
+
+
+class TestSimpleView(unittest.TestCase):
+    def _payload(self, recs):
+        return {
+            "meta": {"days": 28, "date": "2026-06-05"},
+            "primary_action": {"title": "Reach for safer git defaults",
+                               "phrase": "use --force-with-lease", "why": "66 risky commands.",
+                               "source": "Behavior recommendation"},
+            "recommendations": recs,
+            "coaching": [{"title": "Searching the hard way", "evidence": "491 of 2558 calls",
+                          "costs": "Built-ins are cheaper.", "better": "Use Grep/Glob/Read."}],
+            "scorecard": [], "work_recap": {}, "charts": {},
+        }
+
+    def test_simple_default_advanced_hidden_with_toggle(self):
+        html = render_report.render(self._payload([
+            {"rank": 1, "confidence": "high", "type": "plugin", "name": "code-review",
+             "job": "PR review", "description": "Automated PR review.",
+             "install": ["/plugin install code-review@mp"], "source_url": "https://x/cr"},
+        ]))
+        self.assertIn('id="view-simple"', html)
+        self.assertIn('id="view-advanced" style="display:none"', html)
+        self.assertLess(html.index('id="view-simple"'), html.index('id="view-advanced"'))
+        self.assertIn("function sdToggleView", html)
+        self.assertEqual(html.count('onclick="sdToggleView()"'), 2)
+        # simple sections present + the action/rec/coaching content
+        for needle in ("Do this next", "Recommended for you", "Habits to tweak",
+                       "code-review", "/plugin install code-review@mp", "Searching the hard way"):
+            self.assertIn(needle, html)
+
+    def test_simple_view_notes_when_fewer_than_three_recs(self):
+        html = render_report.render(self._payload([
+            {"rank": 1, "confidence": "high", "type": "plugin", "name": "a",
+             "install": ["x"], "source_url": ""},
+            {"rank": 2, "confidence": "med", "type": "plugin", "name": "b",
+             "install": ["y"], "source_url": ""},
+        ]))
+        self.assertIn("Only 2 catalog-backed match", html)
+
+    def test_no_external_resource_loads(self):
+        html = render_report.render(self._payload([]))
+        import re
+        self.assertEqual(
+            re.findall(r'(?:<script[^>]+src|<link[^>]+href|<img[^>]+src)="https?://', html), [])
 
 
 if __name__ == "__main__":
