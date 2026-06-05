@@ -919,6 +919,8 @@ SIMPLE_CSS = """
 .simple-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:20px}
 .simple-title{font-size:20px;font-weight:700;color:#171717}
 .simple-title span{color:#6B7280;font-weight:400;font-size:15px}
+.simple-arch-title{font-size:30px;font-weight:800;color:#171717;margin:4px 0 20px;letter-spacing:-0.02em}
+.simple-arch-label{font-size:15px;font-weight:600;color:#6B7280;letter-spacing:0;display:block;margin-bottom:2px}
 .viewtoggle{background:#6D28D9;color:#fff;border:0;border-radius:999px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
 .viewtoggle:hover{background:#5b21b6}
 .simpleview .card{margin:0 0 14px}
@@ -1199,6 +1201,11 @@ def simple_view(payload: dict, m: dict, grove_html: str) -> str:
     """The default, easy-to-scan view: Primary action · Recommendations ·
     Coaching · Daimon Grove, with a button to switch to the advanced report."""
     days = esc(m.get("days", 28))
+    arch_title = esc((payload.get("archetype") or {}).get("title", ""))
+    arch_html = (
+        f'<h1 class="simple-arch-title"><span class="simple-arch-label">Your archetype: </span>{arch_title}</h1>'
+        if arch_title else ""
+    )
     pa = simple_primary_action_card(payload.get("primary_action") or {})
     recs = simple_recs_block(payload.get("recommendations") or [])
     coach = simple_coach_block(payload.get("coaching") or [])
@@ -1208,7 +1215,7 @@ def simple_view(payload: dict, m: dict, grove_html: str) -> str:
         f'<div class="simple-title">🏛 Skills Daimon <span>· last {days} days</span></div>'
         '<button class="viewtoggle" id="view-toggle" onclick="sdToggleView()">Advanced view →</button>'
         '</div>'
-        + pa + recs + coach + (grove_html or "")
+        + arch_html + pa + recs + coach + (grove_html or "")
         + '<div class="simple-foot">🔒 Local only · evidence from your own sessions · nothing left this machine</div>'
         '</div>'
     )

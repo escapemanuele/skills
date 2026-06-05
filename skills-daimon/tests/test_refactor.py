@@ -305,6 +305,7 @@ class TestSimpleView(unittest.TestCase):
     def _payload(self, recs):
         return {
             "meta": {"days": 28, "date": "2026-06-05"},
+            "archetype": {"title": "The Builder-Scribe", "tagline": "t"},
             "primary_action": {"title": "Reach for safer git defaults",
                                "phrase": "use --force-with-lease", "why": "66 risky commands.",
                                "source": "Behavior recommendation"},
@@ -329,6 +330,8 @@ class TestSimpleView(unittest.TestCase):
         for needle in ("Do this next", "Recommended for you", "Habits to tweak",
                        "code-review", "/plugin install code-review@mp", "Searching the hard way"):
             self.assertIn(needle, html)
+        # hero archetype title (just the title) appears in the simple view
+        self.assertIn('class="simple-arch-label">Your archetype: </span>The Builder-Scribe', html)
 
     def test_simple_view_notes_when_fewer_than_three_recs(self):
         html = render_report.render(self._payload([
