@@ -330,8 +330,9 @@ class TestSimpleView(unittest.TestCase):
         for needle in ("Do this next", "Recommended for you", "Habits to tweak",
                        "code-review", "/plugin install code-review@mp", "Searching the hard way"):
             self.assertIn(needle, html)
-        # hero archetype title (just the title) appears in the simple view
-        self.assertIn('class="simple-arch-label">Your archetype: </span>The Builder-Scribe', html)
+        # full archetype section appears in the simple view (label + title + details)
+        self.assertIn('class="archlabel">Your archetype', html)
+        self.assertIn('class="archtitle">The Builder-Scribe', html)
 
     def test_simple_view_notes_when_fewer_than_three_recs(self):
         html = render_report.render(self._payload([

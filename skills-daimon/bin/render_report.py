@@ -1303,11 +1303,9 @@ def simple_view(payload: dict, m: dict, grove_html: str, share_svg: str = "") ->
     Coaching · Daimon Grove, with a button to switch to the advanced report and
     a button to download a shareable archetype card."""
     days = esc(m.get("days", 28))
-    arch_title = esc((payload.get("archetype") or {}).get("title", ""))
-    arch_html = (
-        f'<h1 class="simple-arch-title"><span class="simple-arch-label">Your archetype: </span>{arch_title}</h1>'
-        if arch_title else ""
-    )
+    # Full five-part archetype section (label, title, tagline, why/strength/
+    # watch-out/next ritual) — same card the advanced view uses.
+    arch_html = archetype_card(payload.get("archetype") or {})
     pa = simple_primary_action_card(payload.get("primary_action") or {})
     recs = simple_recs_block(payload.get("recommendations") or [])
     coach = simple_coach_block(payload.get("coaching") or [])
