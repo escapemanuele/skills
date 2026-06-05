@@ -140,7 +140,7 @@ The coaching section gets a hard visual break — full-width separator + top-lev
 
 ## Recommendation count / tone
 
-- **Aim for 3 recommendations (min); cap at 5.** If only 1–2 strong jobs, widen the job search to next-best signals and re-query — every rec stays catalog-backed and count-grounded. If fewer than 3 real hits genuinely exist, say so plainly. Never pad, never invent.
+- **Aim for at least 3 recommendations; cap at 5.** Try hard to reach 3 real hits before settling: widen the job terms to the next-best signals (secondary bash verbs, MCP calls, recap focus areas) and **re-query every source** — `catalog_search.py`, plus a live `npx skills find` and a live `ai-skills` probe (these surface matches the offline marketplaces miss). Every rec stays catalog-backed and count-grounded. Only if fewer than 3 real hits genuinely exist after widening do you show what's real and say so plainly. **Never pad, never invent** — a missing third rec beats a fabricated one; the simple view already prints an honest "only N matched" note.
 - Lead with evidence. Mark confidence honestly — *"low"* is fine.
 - Max 3 "worth building yourself" entries, max 3 coaching points.
 - Evidence-bound habit calls are in scope (they cite a count). Count-free editorializing is out.
