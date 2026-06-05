@@ -23,6 +23,7 @@ import re
 import sys
 import time
 from datetime import datetime as _dt
+from datetime import timedelta, timezone
 from pathlib import Path
 
 # Shared secret-redactor (applied at the write boundary).
@@ -33,6 +34,44 @@ from redact import redact, redact_in  # noqa: E402
 PROMPT_MAX = 160
 TOP_N = 25
 SUMMARY_CAP_BYTES = 60_000
+
+# --- Output budgets -------------------------------------------------------
+# Control how much evidence the scan emits. `compact` (default) is tuned for
+# low token cost while keeping every field the report pipeline needs; `full`
+# reproduces the historic richer behavior. All budgets still pass through the
+# same redactor and contain the same KEYS — only list sizes/caps differ.
+BUDGETS = {
+    "compact": {
+        "summary_cap_bytes": 28_000,
+        "top_n": 12,
+        "samples_per_verb": 2,
+        "oneoff_count": 0,        # sampled one-off prompts disabled
+        "session_index_count": 0, # session index disabled
+        "recurring_min": 3,
+    },
+    "normal": {
+        "summary_cap_bytes": 40_000,
+        "top_n": 20,
+        "samples_per_verb": 3,
+        "oneoff_count": 10,
+        "session_index_count": 10,
+        "recurring_min": 2,
+    },
+    "full": {
+        "summary_cap_bytes": 60_000,
+        "top_n": 25,
+        "samples_per_verb": 5,
+        "oneoff_count": 30,
+        "session_index_count": 20,
+        "recurring_min": 2,
+    },
+}
+DEFAULT_BUDGET = "compact"
+
+
+def resolve_budget(name: str | None) -> dict:
+    """Return the budget config for `name`, falling back to full."""
+    return BUDGETS.get(name or "full", BUDGETS["full"])
 
 # --- Outcome / friction / completion (PR α) ---------------------------------
 USAGE_DATA = Path.home() / ".claude" / "usage-data"
@@ -557,7 +596,18 @@ OPS_MCP_HINTS = ("gmail", "calendar", "slack", "telegram", "discord", "notion")
 PROSE_EXT = {"md", "markdown", "mdx", "txt", "rst", "org", "tex", "adoc"}
 
 
-def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
+def scan(root: Path, max_age_days: int, cwd: Path | None = None,
+         budget: str | None = None) -> dict:
+    # `budget=None` keeps the historic full behavior for programmatic callers
+    # and tests; the CLI defaults to compact.
+    cfg = resolve_budget(budget)
+    top_n = cfg["top_n"]
+    samples_per_verb = cfg["samples_per_verb"]
+    recurring_min = cfg["recurring_min"]
+    oneoff_count = cfg["oneoff_count"]
+    session_index_count = cfg["session_index_count"]
+    summary_cap_bytes = cfg["summary_cap_bytes"]
+
     sessions = []
     bash_verbs = collections.Counter()
     bash_verb_samples: dict[str, list[str]] = collections.defaultdict(list)
@@ -618,6 +668,13 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
     # --- PR β: stuck-loop detection (per session). Raw command is kept ONLY
     #          for this current run's emit; nothing here lands in history.jsonl.
     stuck_loops: list[dict] = []
+
+    # Event-time cutoff: mtime (in iter_session_files) is only a pre-filter on
+    # which files to open. A long-lived session file can hold events from well
+    # before the window, so we also drop individual events older than the
+    # cutoff by their own timestamp. Events without a parseable timestamp are
+    # kept (we can't tell, so we don't silently lose them).
+    event_cutoff = _dt.now(timezone.utc) - timedelta(days=max_age_days)
 
     for project, path, mtime in iter_session_files(root, max_age_days):
         session_user_msgs = 0
@@ -687,6 +744,16 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                         br = ev.get("gitBranch")
                         if isinstance(br, str) and br and br != "HEAD":
                             proj_branch[project] = br
+                    # Per-event time filter (metadata above is captured first so
+                    # cwd/branch survive even from older events in the file).
+                    ets = ev.get("timestamp")
+                    if ets:
+                        et = _parse_ts(ets)
+                        if et is not None:
+                            if et.tzinfo is None:
+                                et = et.replace(tzinfo=timezone.utc)
+                            if et < event_cutoff:
+                                continue
                     typ = ev.get("type")
                     if typ == "user":
                         msg = ev.get("message") or {}
@@ -771,7 +838,7 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
                                 verb = extract_bash_verb(cmd)
                                 if verb:
                                     bash_verbs[verb] += 1
-                                    if len(bash_verb_samples[verb]) < SAMPLES_PER_VERB:
+                                    if len(bash_verb_samples[verb]) < samples_per_verb:
                                         normalized = re.sub(r"\s+", " ", cmd.strip())[:SAMPLE_CMD_MAX_LEN]
                                         # Dedupe: skip if we already captured this exact command for this verb
                                         if normalized and normalized not in bash_verb_sample_seen[verb]:
@@ -852,18 +919,19 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
             }
         )
 
-    # Pick top repeated prompts (recurring >= 2)
+    # Pick top repeated prompts (recurring >= budget's recurring_min)
     recurring = [
         {"prompt": p, "count": n}
-        for p, n in prompt_counter.most_common(TOP_N)
-        if n >= 2
+        for p, n in prompt_counter.most_common(top_n)
+        if n >= recurring_min
     ]
-    # And a smaller sample of one-off prompts (helps Claude see breadth)
+    # And a smaller sample of one-off prompts (helps Claude see breadth).
+    # compact disables this (oneoff_count == 0).
     sampled_oneoffs = [
         {"prompt": p}
         for p, n in list(prompt_counter.items())
         if n == 1
-    ][:30]
+    ][:oneoff_count]
 
     installed = discover_installed(cwd or Path.cwd())
 
@@ -988,18 +1056,18 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
         "max_age_days": max_age_days,
         "session_count": len(sessions),
         "projects": dict(project_counts.most_common()),
-        "tool_use_top": dict(tool_uses.most_common(TOP_N)),
-        "mcp_calls_top": dict(mcp_calls.most_common(TOP_N)),
-        "bash_verbs_top": dict(bash_verbs.most_common(TOP_N)),
+        "tool_use_top": dict(tool_uses.most_common(top_n)),
+        "mcp_calls_top": dict(mcp_calls.most_common(top_n)),
+        "bash_verbs_top": dict(bash_verbs.most_common(top_n)),
         "bash_verb_samples": {
             v: bash_verb_samples[v]
-            for v, _ in bash_verbs.most_common(TOP_N)
+            for v, _ in bash_verbs.most_common(top_n)
             if bash_verb_samples[v]
         },
         "web_fetches": web_fetches,
         "recurring_prompts": recurring,
         "sampled_oneoff_prompts": sampled_oneoffs,
-        "session_index": sessions[-20:],
+        "session_index": sessions[-session_index_count:] if session_index_count else [],
         "installed_skills": installed["skills"],
         "installed_plugins": installed["plugins"],
         "available_catalogs": catalogs,
@@ -1019,10 +1087,10 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None) -> dict:
     summary = redact_in(summary)
 
     serialized = json.dumps(summary)
-    if len(serialized) > SUMMARY_CAP_BYTES:
+    if len(serialized) > summary_cap_bytes:
         # Trim the least-essential lists until we fit.
         for key in ("sampled_oneoff_prompts", "session_index", "recurring_prompts"):
-            while summary[key] and len(json.dumps(summary)) > SUMMARY_CAP_BYTES:
+            while summary[key] and len(json.dumps(summary)) > summary_cap_bytes:
                 summary[key].pop()
     return summary
 
@@ -1035,6 +1103,12 @@ def main() -> int:
         help="Path to ~/.claude/projects (default).",
     )
     parser.add_argument("--days", type=int, default=28, help="Days to look back (default 28).")
+    parser.add_argument(
+        "--budget",
+        choices=tuple(BUDGETS.keys()),
+        default=DEFAULT_BUDGET,
+        help="Output budget: compact (default, smallest), normal, or full (richest).",
+    )
     parser.add_argument(
         "--cwd",
         default=None,
@@ -1079,7 +1153,7 @@ def main() -> int:
         print(json.dumps({"error": f"Sessions dir not found: {root}"}), file=sys.stdout)
         return 1
     cwd = Path(args.cwd) if args.cwd else None
-    summary = scan(root, args.days, cwd)
+    summary = scan(root, args.days, cwd, budget=args.budget)
     json.dump(summary, sys.stdout)
     sys.stdout.write("\n")
     return 0

@@ -38,6 +38,7 @@ from __future__ import annotations
 import datetime as _dt
 import html
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -76,6 +77,38 @@ def safe_metric_text(s) -> str:
 
 def esc_metric(s) -> str:
     return esc(safe_metric_text(s))
+
+
+# --------------------------------------------------------------------------
+# Anthropic /insights cross-reference
+# --------------------------------------------------------------------------
+def _extract_insights_sections(html_path: Path) -> dict | None:
+    """Lift the 'New Ways to Use Claude Code' and 'On the Horizon' sections
+    from a locally cached `/insights` report. Returns `{patterns, horizon}`
+    as raw HTML snippets, or None if the file is missing / unreadable / the
+    Anthropic layout has changed enough that the anchors aren't found.
+
+    Strips inline `on*` handlers and `<button>` elements so the embedded
+    snippet doesn't pull in /insights' JS (we ship none).
+    """
+    try:
+        raw = html_path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    out = {}
+    for anchor, key in [("section-patterns", "patterns"),
+                        ("section-horizon",  "horizon")]:
+        start = re.search(rf'<h2 id="{anchor}">.*?</h2>', raw, re.DOTALL)
+        if not start:
+            continue
+        tail = raw[start.end():]
+        nxt = re.search(r'<h2\b|<div class="fun-ending"\b', tail)
+        end_pos = start.end() + (nxt.start() if nxt else len(tail))
+        snippet = raw[start.start():end_pos]
+        snippet = re.sub(r'<button\b[^>]*>.*?</button>', '', snippet, flags=re.DOTALL)
+        snippet = re.sub(r'\son\w+="[^"]*"', '', snippet)
+        out[key] = snippet.strip()
+    return out if out else None
 
 
 def bar_chart(data: dict, title: str, top: int = 10, color: str = BAR) -> str:
@@ -525,10 +558,15 @@ body{margin:0;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
   font-size:13px;font-weight:600;
   transition:background .12s,transform .12s}
 .snav:hover{background:#fff4dc;transform:translateX(2px)}
+.snav.active{background:#fff4dc;color:#7C4A28;font-weight:700}
+.snav-ext{margin-top:6px;border-top:1px solid #ead6b5;padding-top:11px}
+.snav-out{font-size:11px;color:%(MUTED)s;margin-left:2px}
+.snav.active .snav-lbl{max-width:160px;opacity:1}
+.snav.active::before{content:"";position:absolute;left:-8px;top:8px;bottom:8px;
+  width:3px;border-radius:2px;background:#7C4A28}
+.snav{position:relative}
 .snav-ico{font-size:16px;line-height:1;width:18px;text-align:center}
-.snav-lbl{white-space:nowrap;max-width:0;overflow:hidden;opacity:0;
-  transition:max-width .18s ease,opacity .15s ease}
-.sidebar:hover .snav-lbl,.snav:focus .snav-lbl{max-width:160px;opacity:1}
+.snav-lbl{white-space:nowrap;max-width:160px;opacity:1}
 section{scroll-margin-top:24px}
 @media(max-width:1100px){
   .sidebar{position:static;flex-direction:row;flex-wrap:wrap;justify-content:center;
@@ -800,11 +838,79 @@ table.rt td.num,table.rt th.num{text-align:right;font-variant-numeric:tabular-nu
 .kind.k-data{background:#fffbeb;color:#d97706}.kind.k-ops{background:#fdf2f8;color:#db2777}
 .kind.k-other{background:#f3f4f6;color:#6b7280}
 footer{margin-top:40px;color:%(MUTED)s;font-size:12px;text-align:center}
+/* embedded /insights sections — minimal styles lifted from Anthropic's report
+   so the patterns + horizon snippets render coherently inside our wrap. */
+.insights-attrib{font-size:11px;color:%(MUTED)s;text-transform:uppercase;letter-spacing:1px;
+  margin:8px 0 14px;padding:6px 10px;background:#FDECC8;border-radius:6px;display:inline-block}
+.patterns-section,.horizon-section{display:flex;flex-direction:column;gap:12px;margin:8px 0 16px}
+.pattern-card{background:#f0f9ff;border:1px solid #7dd3fc;border-radius:8px;padding:16px}
+.pattern-title{font-weight:600;font-size:15px;color:#0f172a;margin-bottom:6px}
+.pattern-summary{font-size:14px;color:#475569;margin-bottom:8px}
+.pattern-detail{font-size:13px;color:#334155;line-height:1.5}
+.copyable-prompt-section{margin-top:12px;padding-top:12px;border-top:1px solid #e2e8f0}
+.copyable-prompt-row{display:flex;align-items:flex-start;gap:8px}
+.copyable-prompt{flex:1;background:#f8fafc;padding:10px 12px;border-radius:4px;
+  font-family:ui-monospace,monospace;font-size:12px;color:#334155;border:1px solid #e2e8f0;
+  white-space:pre-wrap;line-height:1.5}
+.prompt-label{font-size:11px;font-weight:600;text-transform:uppercase;color:#64748b;margin-bottom:6px}
+.pattern-prompt{background:#f8fafc;padding:12px;border-radius:6px;margin-top:12px;border:1px solid #e2e8f0}
+.pattern-prompt code{font-family:ui-monospace,monospace;font-size:12px;color:#334155;
+  display:block;white-space:pre-wrap;margin-bottom:8px}
+.horizon-card{background:linear-gradient(135deg,#faf5ff 0%%,#f5f3ff 100%%);
+  border:1px solid #c4b5fd;border-radius:8px;padding:16px}
+.horizon-title{font-weight:600;font-size:15px;color:#5b21b6;margin-bottom:8px}
+.horizon-possible{font-size:14px;color:#334155;margin-bottom:10px;line-height:1.5}
+.horizon-tip{font-size:13px;color:#6b21a8;background:rgba(255,255,255,0.6);
+  padding:8px 12px;border-radius:4px;margin-bottom:10px}
 """ % {
     "INK": INK, "ACCENT": ACCENT, "ACCENT_SOFT": ACCENT_SOFT,
     "MUTED": MUTED, "GAP": GAP, "BG": BG,
     "GOOD": GOOD, "WATCH": WATCH, "BAD": BAD, "INFO": INFO,
 }
+
+
+# Inline JS: highlight the sidebar entry whose <section> is currently in
+# the upper-mid third of the viewport. No-op when there is no sidebar.
+ACTIVE_SECTION_JS = """
+<script>
+(function(){
+  var navs = Array.from(document.querySelectorAll('.snav'));
+  if (!navs.length || !('IntersectionObserver' in window)) return;
+  var byEl = new Map();
+  var ordered = [];
+  navs.forEach(function(a){
+    var id = (a.getAttribute('href') || '').slice(1);
+    var el = id && document.getElementById(id);
+    if (el) { byEl.set(el, a); ordered.push(el); }
+  });
+  if (!byEl.size) return;
+  var visible = new Set();
+  function pick(){
+    for (var i = 0; i < ordered.length; i++) {
+      var el = ordered[i];
+      if (visible.has(el)) {
+        navs.forEach(function(a){ a.classList.remove('active'); a.removeAttribute('aria-current'); });
+        var hit = byEl.get(el);
+        hit.classList.add('active');
+        hit.setAttribute('aria-current', 'true');
+        return;
+      }
+    }
+  }
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if (e.isIntersecting) visible.add(e.target);
+      else visible.delete(e.target);
+    });
+    pick();
+  }, { rootMargin: '-20% 0px -60% 0px', threshold: 0 });
+  ordered.forEach(function(el){ io.observe(el); });
+  // Initial pass — first section active until scroll fires the observer.
+  navs[0].classList.add('active');
+  navs[0].setAttribute('aria-current', 'true');
+})();
+</script>
+"""
 
 
 def _gamify_blocks(payload: dict, m: dict):
@@ -1073,6 +1179,22 @@ def render(payload: dict) -> str:
         if coaching else ""
     )
 
+    # Anthropic /insights cross-reference: pull the two qualitative sections
+    # (New Ways / On the Horizon) from the locally cached report, plus a
+    # sidebar link to the full report. All optional — skipped if missing.
+    insights_report = Path.home() / ".claude" / "usage-data" / "report.html"
+    insights_sections = _extract_insights_sections(insights_report) if insights_report.is_file() else None
+    patterns_html = ""
+    horizon_html  = ""
+    if insights_sections:
+        attrib = (
+            '<div class="insights-attrib">From your latest Anthropic /insights run</div>'
+        )
+        if insights_sections.get("patterns"):
+            patterns_html = attrib + insights_sections["patterns"]
+        if insights_sections.get("horizon"):
+            horizon_html  = attrib + insights_sections["horizon"]
+
     # Sidebar — only entries whose section actually rendered show up.
     nav_items = [
         ("hero",     "🏛", "Verdict",       hero_html or arch_html),
@@ -1084,7 +1206,18 @@ def render(payload: dict) -> str:
         ("gaps",     "🛠",  "Build",         gaps_html),
         ("grove",    "🌲", "Grove",         grove_html),
         ("recap",    "🧭", "What you did",  recap_html),
+        ("patterns", "💡", "New ways",      patterns_html),
+        ("horizon",  "🔮", "On the horizon", horizon_html),
     ]
+
+    external_links = []
+    if insights_report.is_file():
+        external_links.append((
+            insights_report.as_uri(),
+            "📊",
+            "Full /insights",
+        ))
+
     sidebar_html = (
         '<aside class="sidebar" aria-label="Jump to section">'
         + "".join(
@@ -1093,6 +1226,13 @@ def render(payload: dict) -> str:
             f'<span class="snav-lbl">{label}</span></a>'
             for slug, ico, label, present in nav_items if present
         )
+        + ("".join(
+            f'<a class="snav snav-ext" href="{esc(url)}" target="_blank" rel="noopener" '
+            f'title="{label} (opens in new tab)">'
+            f'<span class="snav-ico" aria-hidden="true">{ico}</span>'
+            f'<span class="snav-lbl">{label} <span class="snav-out">↗</span></span></a>'
+            for url, ico, label in external_links
+        ) if external_links else "")
         + '</aside>'
     )
 
@@ -1114,9 +1254,11 @@ def render(payload: dict) -> str:
         + _sec("coaching", coach_html)
         + _sec("grove",    grove_html)
         + _sec("recap",    recap_html)
+        + _sec("patterns", patterns_html)
+        + _sec("horizon",  horizon_html)
         + '<footer>🏛 Generated by <b>Skills Daimon</b> · evidence from your own '
           'Claude Code sessions · nothing left this machine 🔒</footer>'
-        "</div></body></html>"
+        "</div>" + ACTIVE_SECTION_JS + "</body></html>"
     )
 
 

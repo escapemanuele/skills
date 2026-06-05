@@ -1,0 +1,91 @@
+version: 1
+scenarios:
+  - id: basic_recommendation_request
+    user_message: |
+      What skills should I install based on how I actually use Claude Code?
+    must_include:
+      - 'Bash: .*scan\.py'
+    must_not_include:
+      - 'Bash: .*rm -rf'
+    rubric:
+      - 'The plan runs the bundled scanner (scan.py) first to gather hard counts before recommending anything.'
+      - 'The plan only recommends skills/plugins that come from a real catalog hit, never invented or guessed names.'
+      - 'The plan clusters session signals into 3-5 recurring jobs backed by concrete counts.'
+      - 'The plan queries every catalog in available_catalogs rather than hardcoding one source.'
+
+  - id: full_report_with_html
+    user_message: |
+      Analyze my Claude usage and give me the full skills-daimon report.
+    must_include:
+      - 'Bash: .*scan\.py'
+      - 'Bash: .*render_report\.py'
+    must_not_include:
+      - 'Bash: .*git push'
+    rubric:
+      - 'The plan runs scan.py, builds the analysis, then renders the HTML companion with render_report.py.'
+      - 'The plan picks exactly one verdict from the ladder and exactly one primary next action.'
+      - 'The plan appends a numeric-only snapshot to history (history.py) after rendering.'
+      - 'Every count cited in the report is sourced from the scan JSON, not estimated.'
+
+  - id: no_session_data
+    user_message: |
+      Run skills-daimon on my recent work.
+    must_include:
+      - 'Bash: .*scan\.py'
+    must_not_include:
+      - 'Bash: .*render_report\.py'
+    rubric:
+      - 'The plan runs the scanner and, if session_count is 0, stops and tells the user there is no recent session data to analyze.'
+      - 'The plan does not fabricate recommendations when there is no evidence.'
+
+  - id: dismiss_recommendation
+    user_message: |
+      Stop recommending pr-review-toolkit to me, I don't want to see it again.
+    must_include:
+      - 'Bash: .*scan\.py --ignore pr-review-toolkit'
+    must_not_include:
+      - 'Write: .*\.ignored\.json'
+    rubric:
+      - 'The plan appends the dismissed name to the ignored list via the scanner --ignore flag and confirms to the user.'
+      - 'The plan does not hand-edit the ignored JSON file directly.'
+
+  - id: coaching_request
+    user_message: |
+      What could I be doing better in my Claude Code workflow?
+    must_include:
+      - 'Bash: .*scan\.py'
+    must_not_include:
+      - 'Bash: .*git reset --hard'
+    rubric:
+      - 'The plan reads coaching_signals from the scan and surfaces at most 3 habit-improvement points, each citing a hard count.'
+      - 'Coaching critiques habits, not the user, and avoids shaming language like "you failed" or "lazy".'
+      - 'The plan only flags habits whose signals clear the documented thresholds (e.g. native-tool bypass >=10% and >=30 calls).'
+
+  - id: no_catalog_match
+    user_message: |
+      Find skills that match the unusual stuff I do, and tell me honestly if nothing fits.
+    must_include:
+      - 'Bash: .*scan\.py'
+    must_not_include:
+      - 'Bash: .*git push --force'
+    rubric:
+      - 'When a job has no real catalog match, the plan states so explicitly and routes it to "Worth building yourself" instead of forcing a weak recommendation.'
+      - 'The plan never pads the output with hand-wavy or invented matches to hit a count.'
+
+  - id: skip_general_task_advice
+    user_message: |
+      How should I structure the retry logic in this payment service I'm writing right now?
+    must_not_include:
+      - 'Bash: .*scan\.py'
+      - 'Bash: .*render_report\.py'
+    rubric:
+      - 'The plan recognizes this is a request for help on a current task, not an analysis of past usage, and does not invoke the skills-daimon scanner.'
+
+  - id: empty_catalogs
+    user_message: |
+      Recommend skills for the work I do most.
+    must_include:
+      - 'Bash: .*scan\.py'
+    rubric:
+      - 'If available_catalogs comes back empty, the plan stops and instructs the user to add a marketplace or install Node so npx skills works, then retry.'
+      - 'The plan does not recommend any skill when no catalog is reachable.'
