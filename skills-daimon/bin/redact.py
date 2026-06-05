@@ -8,16 +8,23 @@ plausible secret to disk, even transiently. We accept false positives — the
 masked token is still readable enough for coaching.
 
 Patterns covered:
+- Private key blocks (`-----BEGIN ... PRIVATE KEY-----` … `-----END ...`)
 - Authorization / Bearer headers
 - OpenAI-style keys (`sk-...`)
 - GitHub tokens (`ghp_…`, `gho_…`, `ghu_…`, `ghs_…`, `ghr_…`)
+- GitLab personal access tokens (`glpat-…`)
+- npm tokens (`npm_…`)
+- Slack tokens (`xoxb-`, `xoxp-`, `xoxa-`, `xoxr-`, `xoxs-`, `xapp-`)
+- Google API keys (`AIza…`)
+- JWT-like tokens (`eyJ….….…`)
 - AWS access key IDs (`AKIA…`, `ASIA…`)
-- Generic 32+ hex strings
+- Generic 32+ hex strings and long base64-ish secrets
 - Basic-auth in URLs (`https://user:pass@host`)
 - `password=` / `token=` query/key forms
 
 Anything that matches is replaced with `<REDACTED>` (or a typed variant for
-clarity, e.g. `<REDACTED:bearer>`).
+clarity, e.g. `<REDACTED:bearer>`). `redact_in` also masks dictionary KEYS as
+defense in depth, not just values.
 """
 
 from __future__ import annotations
@@ -25,6 +32,10 @@ from __future__ import annotations
 import re
 
 _PATTERNS = [
+    # Private key blocks (multiline) — mask the entire PEM body first.
+    (re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"),
+     "<REDACTED:private-key>"),
+
     # Authorization / Bearer headers — consume value up to quote/newline so
     # `Authorization: Bearer <token>` doesn't leave the token exposed after
     # eating only "Bearer".
@@ -32,9 +43,16 @@ _PATTERNS = [
      r"\1: <REDACTED>"),
     (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._\-]+"), "Bearer <REDACTED>"),
 
-    # Vendor tokens — keep the prefix, mask the body
+    # JWT-like tokens: header.payload(.signature), all base64url, starting eyJ
+    (re.compile(r"\beyJ[A-Za-z0-9_\-]{8,}(?:\.[A-Za-z0-9_\-]+){1,2}"), "<REDACTED:jwt>"),
+
+    # Vendor tokens — keep the prefix where useful, mask the body
     (re.compile(r"\bsk-(?:proj-|live-|test-)?[A-Za-z0-9_\-]{20,}"), "sk-<REDACTED>"),
     (re.compile(r"\bgh[opsur]_[A-Za-z0-9]{20,}"), "<REDACTED:gh-token>"),
+    (re.compile(r"\bglpat-[A-Za-z0-9_\-]{20,}"), "<REDACTED:gitlab-token>"),
+    (re.compile(r"\bnpm_[A-Za-z0-9]{20,}"), "<REDACTED:npm-token>"),
+    (re.compile(r"\b(?:xox[baprs]|xapp)-[A-Za-z0-9-]{10,}"), "<REDACTED:slack-token>"),
+    (re.compile(r"\bAIza[A-Za-z0-9_\-]{30,}"), "<REDACTED:google-key>"),
     (re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"), "<REDACTED:aws-key>"),
 
     # Basic-auth in URLs: https://user:pass@host -> https://<REDACTED>@host
@@ -45,8 +63,13 @@ _PATTERNS = [
      r"\1=<REDACTED>"),
 ]
 
-# 32+ hex / base64-ish (kept last to avoid clobbering above forms)
+# 32+ hex (kept late to avoid clobbering above forms)
 _GENERIC_LONG = re.compile(r"\b[A-Fa-f0-9]{32,}\b")
+# Long base64-ish secrets: ≥40 chars from the base64 alphabet containing BOTH a
+# digit and a letter (so ordinary long words / paths don't trip it).
+_BASE64_LONG = re.compile(
+    r"\b(?=[A-Za-z0-9+/]*\d)(?=[A-Za-z0-9+/]*[A-Za-z])[A-Za-z0-9+/]{40,}={0,2}\b"
+)
 
 
 def redact(text: str) -> str:
@@ -57,6 +80,7 @@ def redact(text: str) -> str:
     for pat, repl in _PATTERNS:
         out = pat.sub(repl, out)
     out = _GENERIC_LONG.sub("<REDACTED:hex>", out)
+    out = _BASE64_LONG.sub("<REDACTED:b64>", out)
     return out
 
 
@@ -69,7 +93,10 @@ def redact_in(obj):
     if isinstance(obj, str):
         return redact(obj)
     if isinstance(obj, dict):
-        return {k: redact_in(v) for k, v in obj.items()}
+        # Redact keys too (defense in depth) — a raw_http_hosts host or similar
+        # could in principle carry a secret. Non-string keys pass through.
+        return {(redact(k) if isinstance(k, str) else k): redact_in(v)
+                for k, v in obj.items()}
     if isinstance(obj, list):
         return [redact_in(v) for v in obj]
     return obj
