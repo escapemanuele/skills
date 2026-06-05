@@ -936,6 +936,13 @@ SIMPLE_CSS = """
 .simple-note{color:#6B7280;font-size:13px;margin:0 0 10px}
 .simple-foot{text-align:center;color:#9CA3AF;font-size:12px;margin-top:26px}
 #view-advanced .viewbar{margin:0 0 16px}
+/* Colorful archetype card in the simple view (matches the advanced hero) */
+.simpleview .archetype-card{background:linear-gradient(135deg,#6D28D9,#7c3aed);color:#fff;border:0;padding:22px}
+.simpleview .archetype-card .archlabel{color:#fff;opacity:.85}
+.simpleview .archetype-card .archtitle{color:#fff;font-size:30px;font-weight:800;letter-spacing:-.3px}
+.simpleview .archetype-card .archtag{color:#fff;opacity:.9}
+.simpleview .archetype-card .arch-dt{color:#FDE68A}
+.simpleview .archetype-card .arch-dd{color:#fff;opacity:.92}
 """
 
 VIEW_TOGGLE_JS = """
