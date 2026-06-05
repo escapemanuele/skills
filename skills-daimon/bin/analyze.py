@@ -517,10 +517,12 @@ def build_coaching(m: dict) -> list[dict]:
     # Hot repo missing CLAUDE.md
     if m["hot_repos"]:
         top = m["hot_repos"][0]
+        # Basename only — never put the full filesystem path in a disk artifact.
+        repo_name = str(top.get("path", "") or "").rstrip("/").split("/")[-1] or "a repo"
         cards.append({
             "title": "A hot repo has no CLAUDE.md",
             "hard_count": f"{_int(top.get('sessions'))} sessions in a repo with no CLAUDE.md",
-            "saw": f"`{top.get('path', 'a repo')}` is used a lot but has no CLAUDE.md.",
+            "saw": f"`{repo_name}` is used a lot but has no CLAUDE.md.",
             "matters": "Per-repo context gets re-explained every session.",
             "better": "Add a short CLAUDE.md so context persists across sessions.",
             "handoff": _NO_INSTALL,
@@ -606,7 +608,7 @@ def build_markdown(scan: dict, m: dict, verdict: dict, archetype: dict,
         L.append("| Project | Sessions | Tokens | Shipped | Focus |")
         L.append("|---|---|---|---|---|")
         for p in (recap.get("top_projects") or [])[:5]:
-            base = str(p.get("path", "")).rstrip("/").split("/")[-1] or p.get("path", "")
+            base = str(p.get("path", "")).rstrip("/").split("/")[-1] or "(repo)"
             shipped = f"{_int(p.get('commits'))}c/{_int(p.get('pushes'))}p"
             L.append(f"| {base} | {_int(p.get('sessions'))} | {_int(p.get('tokens'))} | {shipped} | {p.get('kind', '')} |")
         L.append("\n---\n")

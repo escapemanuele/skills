@@ -349,5 +349,61 @@ class TestSimpleView(unittest.TestCase):
             re.findall(r'(?:<script[^>]+src|<link[^>]+href|<img[^>]+src)="https?://', html), [])
 
 
+class TestShareCard(unittest.TestCase):
+    def _payload(self):
+        return {
+            "meta": {"days": 28, "date": "2026-06-05"},
+            "archetype": {"title": "The Builder-Scribe", "tagline": "You turn ideas into artifacts."},
+            "primary_action": {"title": "X", "phrase": "y", "why": "z", "source": "s"},
+            "recommendations": [], "coaching": [],
+            "scorecard": [], "charts": {},
+            "work_recap": {"mix": {"dev": 48, "writing": 42, "data": 5, "ops": 5},
+                           "top_projects": [{"path": "/Users/me/Secret-Project", "sessions": 9,
+                                             "tokens": 100, "kind": "dev", "commits": 1, "pushes": 1}]},
+            # gamify pass-through so build_game_state produces a grove/level
+            "coaching_signals": {"native_tool_bypass": {"bash_total": 0, "bypass_total": 0,
+                                 "bypass_calls": {}, "native_tool_use": {}}, "destructive_cmds": [],
+                                 "raw_http_hosts": {}, "sleep_calls": 0, "hot_repos_without_claudemd": []},
+            "outcomes": {"by_facet": {}, "friction_sessions": {}, "coverage": {"labeled": 0, "total": 9}},
+            "memory_events": {"sessions_with_memory": 0}, "tool_errors": {},
+            "stuck_loops": [], "installed_skills": [], "recurring_prompts": [], "completion": {},
+        }
+
+    def test_card_svg_has_archetype_and_mix_no_identifying_data(self):
+        svg = render_report.build_share_card_svg(
+            {"title": "The Builder-Scribe", "tagline": "tag"},
+            {"dev": 48, "writing": 42, "data": 5, "ops": 5},
+            {"command_tree_level": 2}, level=3, xp=120)
+        self.assertTrue(svg.lstrip().startswith("<svg"))
+        self.assertIn("The Builder-Scribe", svg)
+        self.assertIn("dev 48%", svg)
+        self.assertIn("Daimon Level 3", svg)
+        # No identifying data: no project paths/names, counts, recs, coaching.
+        for leak in ("/Users/", "Secret-Project", "sessions", "CLAUDE.md", "git push"):
+            self.assertNotIn(leak, svg)
+
+    def test_card_svg_is_self_contained(self):
+        svg = render_report.build_share_card_svg({"title": "T"}, {"dev": 100},
+                                                 {}, level=1, xp=0)
+        import re
+        self.assertEqual(re.findall(r'(?:href|src)="https?://', svg), [])
+
+    def test_card_svg_is_well_formed_xml_with_nested_grove(self):
+        import xml.dom.minidom as M
+        svg = render_report.build_share_card_svg(
+            {"title": "T", "tagline": "x"}, {"dev": 60, "writing": 40},
+            {"command_tree_level": 3, "memory_well_level": 2}, level=2, xp=80)
+        M.parseString(svg)  # raises if malformed (e.g. duplicate attributes)
+        self.assertGreaterEqual(svg.count("<svg"), 2)  # poster + nested grove
+
+    def test_render_embeds_share_button_and_download_js(self):
+        html = render_report.render(self._payload())
+        self.assertIn("🔗 Share my archetype", html)
+        self.assertIn('id="sd-share-card"', html)
+        self.assertIn("function sdDownloadCard", html)
+        # the user's real project path must not leak into the card template region
+        self.assertNotIn("/Users/me/Secret-Project", html)
+
+
 if __name__ == "__main__":
     unittest.main()

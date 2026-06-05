@@ -951,16 +951,44 @@ function sdToggleView(){
 </script>
 """
 
+# Share card: a button to download the wrapped archetype card as a self-contained
+# SVG. Fully client-side — builds a Blob from the embedded SVG and downloads it.
+# Nothing is uploaded; the user posts the file themselves.
+SHARE_CSS = """
+.viewtoggle.share{background:#0F766E}
+.viewtoggle.share:hover{background:#0b5e57}
+.share-preview{margin:0 0 14px}
+.share-preview summary{cursor:pointer;color:#6D28D9;font-size:13px;font-weight:600}
+.share-preview svg{max-width:340px;width:100%;height:auto;margin-top:10px;border:1px solid #E5E7EB;border-radius:12px}
+.share-hint{color:#9CA3AF;font-size:12px;margin:2px 0 0}
+.simple-actions{display:flex;gap:8px;flex-wrap:wrap}
+"""
+
+SHARE_JS = """
+<script>
+function sdDownloadCard(){
+  var t=document.getElementById('sd-share-card'); if(!t)return;
+  var svg=t.innerHTML.trim(); if(!svg)return;
+  var blob=new Blob([svg],{type:'image/svg+xml'});
+  var url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url; a.download='skills-daimon-archetype.svg';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+</script>
+"""
+
 
 def _gamify_blocks(payload: dict, m: dict):
-    """Return (level_chip_html, quest_card_html, grove_section_html) — empty
-    strings if gamification is unavailable. Pulls fresh history so deltas
-    are honest. Never raises into the renderer."""
+    """Return (level_chip_html, quest_card_html, grove_section_html, game_state)
+    — empty strings + None if gamification is unavailable. Pulls fresh history
+    so deltas are honest. Never raises into the renderer. The game_state is
+    returned so the caller can build the share card from the same numbers."""
     try:
         import gamify as _gamify    # type: ignore
         import history as _history  # type: ignore
     except Exception:
-        return "", "", ""
+        return "", "", "", None
     try:
         entries = _history.read_last(8, window_days=int(m.get("days") or 0) or None)
     except Exception:
@@ -969,7 +997,7 @@ def _gamify_blocks(payload: dict, m: dict):
         gs = _gamify.build_game_state(payload, entries, today=m.get("date"),
                                        window_days=m.get("days"))
     except Exception:
-        return "", "", ""
+        return "", "", "", None
 
     # Top: a compact Daimon Level chip next to the archetype.
     level_chip = (
@@ -1124,7 +1152,80 @@ def _gamify_blocks(payload: dict, m: dict):
         '</div>'
     )
 
-    return level_chip, quest_html, grove_html
+    return level_chip, quest_html, grove_html, gs
+
+
+def build_share_card_svg(archetype: dict, work_mix: dict, grove: dict,
+                         level: int, xp: int) -> str:
+    """A self-contained 1080×1080 SVG 'wrapped' poster — non-identifying only.
+
+    Contains the archetype title + tagline, the work-mix bar + legend, the Daimon
+    Grove visual, and the Daimon Level/XP. NO project names/paths, counts, recs,
+    or coaching. Pure inline SVG, no external assets — downloadable as an image
+    the user can post."""
+    archetype = archetype or {}
+    title = esc(archetype.get("title", "Your archetype"))
+    tagline = esc(archetype.get("tagline", ""))
+
+    # Work-mix segmented bar (drawn as rects) + legend, matching report colors.
+    seg_colors = {"dev": "#6366f1", "writing": "#10b981", "data": "#f59e0b",
+                  "ops": "#ec4899", "other": "#9ca3af"}
+    mix = [(k, int(v)) for k, v in (work_mix or {}).items() if int(v) > 0]
+    bar_x, bar_y, bar_w, bar_h = 80, 470, 920, 34
+    segs = []
+    legend = []
+    cursor = bar_x
+    for k, v in mix:
+        w = round(bar_w * v / 100)
+        col = seg_colors.get(k, seg_colors["other"])
+        segs.append(f'<rect x="{cursor}" y="{bar_y}" width="{w}" height="{bar_h}" fill="{col}"/>')
+        legend.append(f'{esc(k)} {v}%')
+        cursor += w
+    bar_bg = f'<rect x="{bar_x}" y="{bar_y}" width="{bar_w}" height="{bar_h}" rx="17" fill="#E5E7EB"/>'
+    bar_clip = (
+        f'<clipPath id="sd-barclip"><rect x="{bar_x}" y="{bar_y}" width="{bar_w}" '
+        f'height="{bar_h}" rx="17"/></clipPath>'
+    )
+    bar_segs = f'<g clip-path="url(#sd-barclip)">{"".join(segs)}</g>' if segs else ""
+    legend_txt = esc(" · ".join(legend)) if legend else ""
+
+    # Nest the grove SVG into a slot (it carries its own 0 0 900 280 viewBox).
+    grove_svg = ""
+    try:
+        import gamify as _gamify  # type: ignore
+        raw = _gamify.render_grove_svg(grove or {})
+        # Re-anchor the returned <svg ...> into our poster's coordinate space.
+        # Strip its own width/height/x/y/preserveAspectRatio from the opening tag
+        # first (keeping its viewBox) so we don't emit duplicate attributes.
+        mo = re.match(r"<svg\b([^>]*)>", raw)
+        if mo:
+            attrs = re.sub(r'\s(?:width|height|x|y|preserveAspectRatio)="[^"]*"', "", mo.group(1))
+            new_open = ('<svg x="40" y="560" width="1000" height="320" '
+                        'preserveAspectRatio="xMidYMid meet"' + attrs + '>')
+            raw = new_open + raw[mo.end():]
+        grove_svg = raw
+    except Exception:
+        grove_svg = ""
+
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" '
+        'width="1080" height="1080" font-family="-apple-system,Segoe UI,Roboto,sans-serif">'
+        '<rect width="1080" height="1080" fill="#F8F7F3"/>'
+        '<rect x="40" y="40" width="1000" height="1000" rx="28" fill="#FFFFFF" stroke="#E5E7EB"/>'
+        f'{bar_clip}'
+        '<text x="80" y="150" font-size="30" font-weight="700" fill="#6D28D9">🏛 Skills Daimon</text>'
+        '<text x="80" y="300" font-size="22" font-weight="600" fill="#6B7280">Your archetype</text>'
+        f'<text x="80" y="372" font-size="62" font-weight="800" fill="#171717">{title}</text>'
+        f'<text x="80" y="424" font-size="26" font-style="italic" fill="#374151">{tagline}</text>'
+        f'{bar_bg}{bar_segs}'
+        f'<text x="80" y="540" font-size="22" fill="#6B7280">{legend_txt}</text>'
+        f'{grove_svg}'
+        f'<rect x="80" y="930" width="360" height="56" rx="28" fill="#EDE9FE"/>'
+        f'<text x="104" y="967" font-size="24" font-weight="800" fill="#6D28D9">Daimon Level {int(level)}</text>'
+        f'<text x="300" y="967" font-size="22" font-weight="500" fill="#6D28D9">· {int(xp)} XP</text>'
+        '<text x="80" y="1010" font-size="18" fill="#9CA3AF">Generated locally from my own Claude Code usage · skills-daimon</text>'
+        '</svg>'
+    )
 
 
 def simple_primary_action_card(a: dict) -> str:
@@ -1197,9 +1298,10 @@ def simple_coach_block(coaching: list) -> str:
     return '<section><h2 class="sec">⚑ Habits to tweak</h2>' + "".join(cards) + '</section>'
 
 
-def simple_view(payload: dict, m: dict, grove_html: str) -> str:
+def simple_view(payload: dict, m: dict, grove_html: str, share_svg: str = "") -> str:
     """The default, easy-to-scan view: Primary action · Recommendations ·
-    Coaching · Daimon Grove, with a button to switch to the advanced report."""
+    Coaching · Daimon Grove, with a button to switch to the advanced report and
+    a button to download a shareable archetype card."""
     days = esc(m.get("days", 28))
     arch_title = esc((payload.get("archetype") or {}).get("title", ""))
     arch_html = (
@@ -1209,13 +1311,33 @@ def simple_view(payload: dict, m: dict, grove_html: str) -> str:
     pa = simple_primary_action_card(payload.get("primary_action") or {})
     recs = simple_recs_block(payload.get("recommendations") or [])
     coach = simple_coach_block(payload.get("coaching") or [])
+
+    # Share card: opt-in, leak-free. The SVG is held in a non-rendered <template>;
+    # a button downloads it client-side. A <details> lets the user preview first.
+    share_btn = ""
+    share_block = ""
+    if share_svg:
+        share_btn = ('<button class="viewtoggle share" onclick="sdDownloadCard()">'
+                     '🔗 Share my archetype</button>')
+        share_block = (
+            f'<template id="sd-share-card">{share_svg}</template>'
+            '<details class="share-preview"><summary>Preview share card</summary>'
+            f'{share_svg}'
+            '<p class="share-hint">Downloads as an SVG image — opens in any browser; '
+            'export to PNG if a site needs raster. Nothing is uploaded.</p>'
+            '</details>'
+        )
+
     return (
         '<div id="view-simple" class="simpleview">'
         '<div class="simple-top">'
         f'<div class="simple-title">🏛 Skills Daimon <span>· last {days} days</span></div>'
-        '<button class="viewtoggle" id="view-toggle" onclick="sdToggleView()">Advanced view →</button>'
+        '<div class="simple-actions">'
+        + share_btn
+        + '<button class="viewtoggle" id="view-toggle" onclick="sdToggleView()">Advanced view →</button>'
+        + '</div>'
         '</div>'
-        + arch_html + pa + recs + coach + (grove_html or "")
+        + arch_html + share_block + pa + recs + coach + (grove_html or "")
         + '<div class="simple-foot">🔒 Local only · evidence from your own sessions · nothing left this machine</div>'
         '</div>'
     )
@@ -1229,7 +1351,21 @@ def render(payload: dict) -> str:
     charts = payload.get("charts", {})
     work_recap = payload.get("work_recap", {})
 
-    level_chip_html, quest_html, grove_html = _gamify_blocks(payload, m)
+    level_chip_html, quest_html, grove_html, game_state = _gamify_blocks(payload, m)
+
+    # Build the shareable archetype card SVG from non-identifying bits only.
+    share_svg = ""
+    if game_state:
+        try:
+            share_svg = build_share_card_svg(
+                payload.get("archetype") or {},
+                (payload.get("work_recap") or {}).get("mix") or {},
+                game_state.get("grove") or {},
+                int(game_state.get("daimon_level") or 0),
+                int(game_state.get("xp_total") or 0),
+            )
+        except Exception:
+            share_svg = ""
 
     # ─── COMBINED HERO (verdict + archetype + Daimon Level in one card) ───
     hero_html = hero_card(
@@ -1374,7 +1510,7 @@ def render(payload: dict) -> str:
 
     # Simple view (default) — easy to scan; Advanced view (hidden) is the full
     # report. A button on each toggles between them. One self-contained file.
-    simple_html = simple_view(payload, m, grove_html)
+    simple_html = simple_view(payload, m, grove_html, share_svg)
     advanced_html = (
         '<div id="view-advanced" style="display:none">'
         + sidebar_html
@@ -1399,10 +1535,10 @@ def render(payload: dict) -> str:
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>Skills Daimon</title><style>" + CSS + SIMPLE_CSS + "</style></head><body>"
+        "<title>Skills Daimon</title><style>" + CSS + SIMPLE_CSS + SHARE_CSS + "</style></head><body>"
         + simple_html
         + advanced_html
-        + ACTIVE_SECTION_JS + VIEW_TOGGLE_JS + "</body></html>"
+        + ACTIVE_SECTION_JS + VIEW_TOGGLE_JS + SHARE_JS + "</body></html>"
     )
 
 
