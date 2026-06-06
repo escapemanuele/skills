@@ -397,6 +397,50 @@ class TestShareCard(unittest.TestCase):
         M.parseString(svg)  # raises if malformed (e.g. duplicate attributes)
         self.assertGreaterEqual(svg.count("<svg"), 2)  # poster + nested grove
 
+    def test_nested_grove_ids_are_namespaced(self):
+        # The preview copy lands in the live DOM alongside the report's own
+        # grove SVGs; its internal ids must be namespaced to avoid dup-id clashes.
+        svg = render_report.build_share_card_svg(
+            {"title": "T"}, {"dev": 100},
+            {"command_tree_level": 3, "memory_well_level": 2}, level=2, xp=80)
+        if "grove_" in svg:  # only when a grove was actually nested
+            self.assertIn("sd-grove_", svg)
+            self.assertNotIn('id="grove_', svg)
+            self.assertNotIn("url(#grove_", svg)
+
+    def test_card_svg_strips_xml_illegal_control_chars(self):
+        import xml.dom.minidom as M
+        svg = render_report.build_share_card_svg(
+            {"title": "Bad\x07Title", "tagline": "tag\x00line"}, {"dev": 100},
+            {}, level=1, xp=0)
+        M.parseString(svg)  # would raise "not well-formed" if control chars leaked
+        self.assertNotIn("\x07", svg)
+        self.assertNotIn("\x00", svg)
+
+    def test_card_svg_does_not_echo_identifying_values(self):
+        # Even if identifying-looking strings are passed in, only title/tagline
+        # render; salted path/count values must never appear in the poster.
+        svg = render_report.build_share_card_svg(
+            {"title": "The Builder-Scribe", "tagline": "tag"},
+            {"dev": 48, "writing": 42, "data": 5, "ops": 5},
+            {"command_tree_level": 2}, level=3, xp=120)
+        self.assertIn("The Builder-Scribe", svg)
+        self.assertIn("dev 48%", svg)
+        for leak in ("/Users/", "Secret-Project", "sessions", "CLAUDE.md", "git push"):
+            self.assertNotIn(leak, svg)
+
+    def test_empty_archetype_falls_back_to_default_title(self):
+        svg = render_report.build_share_card_svg({}, {}, {}, level=0, xp=0)
+        self.assertTrue(svg.lstrip().startswith("<svg"))
+        self.assertIn("Your archetype", svg)
+
+    def test_tolerant_of_non_numeric_mix(self):
+        # A stray non-numeric mix value must not crash the poster.
+        svg = render_report.build_share_card_svg(
+            {"title": "T"}, {"dev": "oops", "writing": 40}, {}, level=1, xp=1)
+        self.assertTrue(svg.lstrip().startswith("<svg"))
+        self.assertIn("writing 40%", svg)
+
     def test_render_embeds_share_button_and_download_js(self):
         html = render_report.render(self._payload())
         self.assertIn("🔗 Share my archetype", html)
@@ -404,6 +448,63 @@ class TestShareCard(unittest.TestCase):
         self.assertIn("function sdDownloadCard", html)
         # the user's real project path must not leak into the card template region
         self.assertNotIn("/Users/me/Secret-Project", html)
+        # the share-card preview's grove ids are namespaced (so they don't collide
+        # with the report's own grove SVGs in the live DOM)
+        self.assertIn("sd-grove_", html)
+
+    def test_simple_view_without_card_has_no_share_button(self):
+        html = render_report.simple_view(self._payload(), {}, "", share_svg="")
+        self.assertNotIn("🔗 Share my archetype", html)
+        self.assertNotIn('id="sd-share-card"', html)
+
+
+class TestBasename(unittest.TestCase):
+    """Repo-name basenaming must strip both POSIX and Windows separators so no
+    full path (which can embed the OS username) reaches a disk artifact."""
+
+    def test_posix_and_windows_separators(self):
+        self.assertEqual(analyze._basename("/Users/me/Code/my-repo"), "my-repo")
+        self.assertEqual(analyze._basename("/Users/me/Code/my-repo/"), "my-repo")
+        self.assertEqual(analyze._basename(r"C:\Users\me\Code\my-repo"), "my-repo")
+        self.assertEqual(analyze._basename(r"C:\Users\me\Code\my-repo\\"), "my-repo")
+        self.assertEqual(analyze._basename(""), "")
+        self.assertEqual(analyze._basename(None), "")
+
+
+class TestCoachingHardCount(unittest.TestCase):
+    """Charter: every coaching point cites a hard count — in HTML, not just md."""
+
+    def test_render_mapping_carries_hard_count_as_evidence(self):
+        cards = [{"title": "T", "hard_count": "5 identical commands in a few minutes",
+                  "saw": "narrative", "matters": "why", "better": "fix"}]
+        out = analyze.coaching_for_render(cards)
+        self.assertEqual(out[0]["evidence"], "5 identical commands in a few minutes")
+        self.assertEqual(out[0]["saw"], "narrative")
+
+    def test_html_coach_card_shows_the_count(self):
+        c = {"title": "Stuck loop", "evidence": "7 identical commands in a few minutes",
+             "saw": "narrative", "costs": "why", "better": "fix"}
+        html = render_report.coach_card(c)
+        self.assertIn("Evidence", html)
+        self.assertIn("7 identical commands", html)
+        self.assertIn("narrative", html)
+
+    def test_full_analyze_render_coaching_has_a_digit(self):
+        import re as _re
+        # A stuck-loop signal yields a coaching card; its rendered evidence must
+        # carry a number end-to-end (analyze -> render).
+        scan = {
+            "meta": {"window_days": 28}, "session_count": 6,
+            "stuck_loops": [{"command_summary": "psql connect", "count": 6,
+                             "command_hash": "abc"}],
+            "available_catalogs": [],
+        }
+        result = analyze.analyze(scan)
+        coaching = result.get("coaching") or result.get("html_payload", {}).get("coaching") or []
+        joined = " ".join(c.get("evidence", "") for c in coaching)
+        if coaching:
+            self.assertTrue(_re.search(r"\d", joined),
+                            f"coaching evidence cites no hard count: {joined!r}")
 
 
 if __name__ == "__main__":

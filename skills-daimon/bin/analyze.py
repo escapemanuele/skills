@@ -74,6 +74,15 @@ def _pct(num: int, den: int) -> int | None:
     return round(100 * num / den)
 
 
+def _basename(p) -> str:
+    """Last path segment, handling both POSIX (/) and Windows (\\) separators.
+
+    Never let a full filesystem path (which can embed the OS username) reach a
+    disk artifact — only the leaf directory name is non-identifying enough."""
+    s = str(p or "").replace("\\", "/").rstrip("/")
+    return s.split("/")[-1]
+
+
 # --------------------------------------------------------------------------
 # Metrics — every value here keeps its denominator alongside it
 # --------------------------------------------------------------------------
@@ -518,7 +527,7 @@ def build_coaching(m: dict) -> list[dict]:
     if m["hot_repos"]:
         top = m["hot_repos"][0]
         # Basename only — never put the full filesystem path in a disk artifact.
-        repo_name = str(top.get("path", "") or "").rstrip("/").split("/")[-1] or "a repo"
+        repo_name = _basename(top.get("path", "")) or "a repo"
         cards.append({
             "title": "A hot repo has no CLAUDE.md",
             "hard_count": f"{_int(top.get('sessions'))} sessions in a repo with no CLAUDE.md",
@@ -532,10 +541,12 @@ def build_coaching(m: dict) -> list[dict]:
 
 
 def coaching_for_render(cards: list[dict]) -> list[dict]:
-    """Map internal coaching cards to render_report's keys:
-    evidence→What we saw, costs→Why it matters, better→Try this."""
+    """Map internal coaching cards to render_report's keys. The hard count is the
+    Evidence line (charter: every coaching point cites a hard count); the narrative
+    saw→What we saw, costs→Why it matters, better→Try this."""
     return [
-        {"title": c["title"], "evidence": c["saw"], "costs": c["matters"], "better": c["better"]}
+        {"title": c["title"], "evidence": c.get("hard_count", ""), "saw": c.get("saw", ""),
+         "costs": c.get("matters", ""), "better": c.get("better", "")}
         for c in cards
     ]
 
@@ -608,7 +619,7 @@ def build_markdown(scan: dict, m: dict, verdict: dict, archetype: dict,
         L.append("| Project | Sessions | Tokens | Shipped | Focus |")
         L.append("|---|---|---|---|---|")
         for p in (recap.get("top_projects") or [])[:5]:
-            base = str(p.get("path", "")).rstrip("/").split("/")[-1] or "(repo)"
+            base = _basename(p.get("path", "")) or "(repo)"
             shipped = f"{_int(p.get('commits'))}c/{_int(p.get('pushes'))}p"
             L.append(f"| {base} | {_int(p.get('sessions'))} | {_int(p.get('tokens'))} | {shipped} | {p.get('kind', '')} |")
         L.append("\n---\n")

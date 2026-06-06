@@ -20,7 +20,7 @@ Payload schema (all keys optional except meta):
      "install": ["cmd1", "cmd2"], "source_url": "..."}
   ],
   "gaps": [{"tag": "...", "note": "...", "init": "npx skills init ..."}],
-  "coaching": [{"title": "...", "evidence": "...", "costs": "...", "better": "..."}],
+  "coaching": [{"title": "...", "evidence": "<hard count>", "saw": "...", "costs": "...", "better": "..."}],
   "charts": {
      "bash_verbs_top": {"ls": 212, ...},
      "tool_use_top": {"Bash": 1112, ...},
@@ -66,6 +66,24 @@ CONF_DOTS = {"high": "●●●", "med": "●●○", "low": "●○○"}
 
 def esc(s) -> str:
     return html.escape(str(s if s is not None else ""))
+
+
+def _int(v) -> int:
+    """Tolerant int coercion — never let a stray non-numeric value crash a render."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
+# Control chars XML 1.0 forbids even when escaped; they make an SVG unopenable.
+_XML_BAD_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _svg_text(s) -> str:
+    """Escape text for inline SVG and strip XML-illegal control chars so the
+    downloadable poster always parses as well-formed XML."""
+    return _XML_BAD_CHARS.sub("", esc(s))
 
 
 def safe_metric_text(s) -> str:
@@ -336,7 +354,8 @@ def coach_card(c: dict) -> str:
     return (
         '<div class="card coach">'
         f'<h4>{esc(c.get("title", ""))}</h4>'
-        f'<p><span class="tag ev-t">What we saw</span> {esc(c.get("evidence", ""))}</p>'
+        f'<p><span class="tag ev-t">Evidence</span> {esc(c.get("evidence", ""))}</p>'
+        f'<p><span class="tag saw-t">What we saw</span> {esc(c.get("saw", ""))}</p>'
         f'<p><span class="tag cost-t">Why it matters</span> {esc(c.get("costs", ""))}</p>'
         f'<p><span class="tag best-t">Try this</span> {esc(c.get("better", ""))}</p>'
         f'{handoff_html}'
@@ -625,6 +644,7 @@ code{font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0f172
 .tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;
   letter-spacing:.5px;padding:1px 7px;border-radius:5px;margin-right:6px}
 .ev-t{background:%(ACCENT_SOFT)s;color:%(ACCENT)s}.cost-t{background:#FEF2F2;color:%(BAD)s}
+.saw-t{background:#F3F4F6;color:#374151}
 .best-t{background:#ECFDF5;color:%(GOOD)s}
 .hand-t{background:#EFF6FF;color:%(INFO)s}
 ul.gaps{list-style:none;padding:0;margin:0}
@@ -1166,18 +1186,20 @@ def build_share_card_svg(archetype: dict, work_mix: dict, grove: dict,
                          level: int, xp: int) -> str:
     """A self-contained 1080×1080 SVG 'wrapped' poster — non-identifying only.
 
-    Contains the archetype title + tagline, the work-mix bar + legend, the Daimon
-    Grove visual, and the Daimon Level/XP. NO project names/paths, counts, recs,
-    or coaching. Pure inline SVG, no external assets — downloadable as an image
-    the user can post."""
+    Contains the archetype title + tagline, the aggregate work-mix bar + legend,
+    the Daimon Grove visual, and the playful Daimon Level/XP. These aggregate
+    percentages and gamified figures carry no identifying signal. It deliberately
+    excludes every identifying datum: project names/paths, per-project session or
+    commit counts, recommendations, and coaching text. Pure inline SVG, no
+    external assets — downloadable as an image the user can post."""
     archetype = archetype or {}
-    title = esc(archetype.get("title", "Your archetype"))
-    tagline = esc(archetype.get("tagline", ""))
+    title = _svg_text(archetype.get("title", "Your archetype"))
+    tagline = _svg_text(archetype.get("tagline", ""))
 
     # Work-mix segmented bar (drawn as rects) + legend, matching report colors.
     seg_colors = {"dev": "#6366f1", "writing": "#10b981", "data": "#f59e0b",
                   "ops": "#ec4899", "other": "#9ca3af"}
-    mix = [(k, int(v)) for k, v in (work_mix or {}).items() if int(v) > 0]
+    mix = [(k, _int(v)) for k, v in (work_mix or {}).items() if _int(v) > 0]
     bar_x, bar_y, bar_w, bar_h = 80, 470, 920, 34
     segs = []
     legend = []
@@ -1186,7 +1208,7 @@ def build_share_card_svg(archetype: dict, work_mix: dict, grove: dict,
         w = round(bar_w * v / 100)
         col = seg_colors.get(k, seg_colors["other"])
         segs.append(f'<rect x="{cursor}" y="{bar_y}" width="{w}" height="{bar_h}" fill="{col}"/>')
-        legend.append(f'{esc(k)} {v}%')
+        legend.append(f'{_svg_text(k)} {v}%')
         cursor += w
     bar_bg = f'<rect x="{bar_x}" y="{bar_y}" width="{bar_w}" height="{bar_h}" rx="17" fill="#E5E7EB"/>'
     bar_clip = (
@@ -1194,7 +1216,7 @@ def build_share_card_svg(archetype: dict, work_mix: dict, grove: dict,
         f'height="{bar_h}" rx="17"/></clipPath>'
     )
     bar_segs = f'<g clip-path="url(#sd-barclip)">{"".join(segs)}</g>' if segs else ""
-    legend_txt = esc(" · ".join(legend)) if legend else ""
+    legend_txt = " · ".join(legend) if legend else ""  # entries already escaped via _svg_text
 
     # Nest the grove SVG into a slot (it carries its own 0 0 900 280 viewBox).
     grove_svg = ""
@@ -1210,7 +1232,12 @@ def build_share_card_svg(archetype: dict, work_mix: dict, grove: dict,
             new_open = ('<svg x="40" y="560" width="1000" height="320" '
                         'preserveAspectRatio="xMidYMid meet"' + attrs + '>')
             raw = new_open + raw[mo.end():]
-        grove_svg = raw
+            # Namespace the grove's internal ids so the preview copy in the live
+            # DOM never collides with the report's other grove SVGs (no dup ids).
+            grove_svg = re.sub(r'(\bid="|url\(#)(grove_)', r'\1sd-\2', raw)
+        else:
+            # Unexpected shape — drop the grove rather than inject unanchored markup.
+            grove_svg = ""
     except Exception:
         grove_svg = ""
 
@@ -1228,8 +1255,8 @@ def build_share_card_svg(archetype: dict, work_mix: dict, grove: dict,
         f'<text x="80" y="540" font-size="22" fill="#6B7280">{legend_txt}</text>'
         f'{grove_svg}'
         f'<rect x="80" y="930" width="360" height="56" rx="28" fill="#EDE9FE"/>'
-        f'<text x="104" y="967" font-size="24" font-weight="800" fill="#6D28D9">Daimon Level {int(level)}</text>'
-        f'<text x="300" y="967" font-size="22" font-weight="500" fill="#6D28D9">· {int(xp)} XP</text>'
+        f'<text x="104" y="967" font-size="24" font-weight="800" fill="#6D28D9">Daimon Level {_int(level)}</text>'
+        f'<text x="300" y="967" font-size="22" font-weight="500" fill="#6D28D9">· {_int(xp)} XP</text>'
         '<text x="80" y="1010" font-size="18" fill="#9CA3AF">Generated locally from my own Claude Code usage · skills-daimon</text>'
         '</svg>'
     )
