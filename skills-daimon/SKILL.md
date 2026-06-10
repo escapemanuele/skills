@@ -26,16 +26,37 @@ set). Map the user's `--compact|--normal|--full` flag to scan's `--budget`
 - If no sessions exist, say there is no recent data.
 - If a catalog is unreachable, report it as unavailable.
 
-## Pipeline
+## Pipeline (3 calls)
 
-1. **Scan** — `python3 ${CLAUDE_SKILL_DIR}/bin/scan.py --days 28 --budget compact`
-   - **GATE A:** if `session_count == 0` → STOP, tell the user there's no recent data. End.
-   - **GATE B:** if `available_catalogs` is empty → emit zero catalog-backed recs (coaching may still run).
-2. **Analyze** — `python3 ${CLAUDE_SKILL_DIR}/bin/analyze.py <scan.json>` computes the verdict, archetype, primary action, scorecard, coaching, history snapshot, and a markdown skeleton deterministically (all rates carry denominators; outcome rates use `outcomes.coverage.labeled`). Its `recommendations`/`gaps` are empty by design — you fill those from live catalog hits in step 3. See `references/analysis.md` to verify or reason by hand.
-3. **Recommend** — cluster 3–5 jobs, query *every* `available_catalogs` entry, pick one catalog-backed winner per job. Unmatched jobs → "Worth building yourself".
-4. **Render HTML** — `python3 ${CLAUDE_SKILL_DIR}/bin/render_report.py <payload.json>`; link the printed `url` at the top of the report. The HTML opens in a **simplified view** (Primary action · Recommendations · Coaching · Daimon Grove) with a button to toggle to the **advanced** full report.
-5. **Append history** — `python3 ${CLAUDE_SKILL_DIR}/bin/history.py append < <snapshot.json>` (numeric-only).
-6. **Print** the markdown report with the visual report URL.
+1. **Run** — `python3 ${CLAUDE_SKILL_DIR}/bin/run.py --days 28 --budget compact`
+   One call: scans, analyzes, stages `payload.json`/`snapshot.json` in a workdir,
+   and prints a slim summary — gates, file paths, the markdown skeleton (verdict,
+   archetype, scorecard, coaching all precomputed; rates carry denominators),
+   `job_signals` for clustering, and ready-made `trends` rows.
+   - **GATE A:** if `gates.session_count == 0` → STOP, tell the user there's no recent data. End.
+   - **GATE B:** if `gates.catalogs` is empty → emit zero catalog-backed recs (coaching may still run).
+2. **Recommend** — cluster 3–5 jobs from `job_signals` + the skeleton, then **one
+   batch call**:
+   `python3 ${CLAUDE_SKILL_DIR}/bin/catalog_search.py --scan <paths.scan> --jobs "git safety, commit push|web research, content extraction|..." --top 6`
+   `|` separates jobs; **commas separate search phrases within a job — keep
+   phrases whole** (registries rank "git safety" far better than "git" +
+   "safety"). Jobs run in parallel; live `npx skills find` is queried inside
+   it (strict registry-verbatim parsing — nothing invented). Probe any `needs_live_probe`
+   mcp-server catalogs yourself. Pick one catalog-backed winner per job;
+   unmatched jobs → "Worth building yourself".
+3. **Finalize** — write `fill.json` (`{"recommendations": [...], "gaps": [...]}`,
+   schema in `references/pipeline.md`), then
+   `python3 ${CLAUDE_SKILL_DIR}/bin/finalize.py --fill fill.json`
+   One call merges the fill into the payload, renders the HTML (opens in a
+   **simplified view** with an advanced toggle), and appends the history
+   snapshot. It prints the report `url`.
+4. **Print** the markdown report as the final message. **First line = the visual
+   report `file://` link**, then the report per `references/report-format.md`.
+   Nothing else in that message — no pipeline narration, no raw JSON, no trailing
+   notes after Trends.
+
+(The old single-step scripts — `scan.py`, `analyze.py`, `render_report.py`,
+`history.py` — still work standalone for debugging; see `references/pipeline.md`.)
 
 ## References (read only when needed)
 

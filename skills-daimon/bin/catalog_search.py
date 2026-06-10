@@ -22,6 +22,11 @@ Usage:
     python3 catalog_search.py --scan scan.json --terms "pull request review" "linear triage"
     python3 catalog_search.py --scan scan.json --terms "pr review"   # JSON to stdout
 
+Batch mode (one call for the whole Step-3 fan-out; jobs run in parallel).
+Jobs are separated by `|`; within a job, commas separate search PHRASES
+(phrases stay whole — better registry ranking than single words):
+    python3 catalog_search.py --scan scan.json --jobs "git safety, commit push|sql query, data analysis" --top 6
+
 Output JSON:
     {"candidates": [ {name, type, description, source_url, install:[...],
                       catalog, matched_terms:[...], installs?, stars?} ],
@@ -33,9 +38,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Source priority for dedupe (higher wins).
@@ -137,56 +144,126 @@ def search_cli_provider(tool: str, catalog_name: str, terms: list[str],
 
 
 # --------------------------------------------------------------------------
-# skills.sh registry (npx skills find) — best-effort parse
+# skills.sh registry (npx skills find) — JSON if offered, else strict text parse
 # --------------------------------------------------------------------------
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+# "owner/repo@skill  123 installs" / "owner/repo@skill  34.9K installs" —
+# every captured token comes verbatim from the registry output, so nothing
+# here can invent a name.
+_SKILLS_SH_HIT_RE = re.compile(r"^(\S+/[^@\s]+)@(\S+(?: \S+)*?)\s+([\d.,]+[KkMm]?) installs?$")
+_SKILLS_SH_URL_RE = re.compile(r"^└ (https://skills\.sh/\S+)$")
+
+
+def _installs_to_int(s: str) -> int:
+    s = s.replace(",", "")
+    mult = {"k": 1_000, "m": 1_000_000}.get(s[-1].lower(), 1)
+    if mult > 1:
+        s = s[:-1]
+    try:
+        return int(float(s) * mult)
+    except ValueError:
+        return 0
+
+
+def parse_skills_sh_text(text: str, term: str) -> list[dict]:
+    """Strictly parse `npx skills find` human output. A hit is accepted only
+    when the name line matches the registry's exact shape; the URL is taken
+    from the following `└ https://skills.sh/...` line when present."""
+    out: list[dict] = []
+    lines = [_ANSI_RE.sub("", ln).strip() for ln in text.splitlines()]
+    for i, ln in enumerate(lines):
+        m = _SKILLS_SH_HIT_RE.match(ln)
+        if not m:
+            continue
+        repo, skill, installs = m.group(1), m.group(2), _installs_to_int(m.group(3))
+        url = ""
+        if i + 1 < len(lines):
+            mu = _SKILLS_SH_URL_RE.match(lines[i + 1])
+            if mu:
+                url = mu.group(1)
+        out.append({
+            "name": skill,
+            "type": "skill",
+            "description": "",
+            "source_url": url,
+            "install": [f"npx skills add {repo}@{skill}"],
+            "catalog": "skills.sh",
+            "catalog_type": "cli-registry",
+            "matched_terms": [term],
+            "installs": installs,
+        })
+    return out
+
+
+def _skills_sh_one_term(term: str, errors: list[str], timeout: int) -> list[dict]:
+    try:
+        r = subprocess.run(["npx", "skills", "find", term, "--json"],
+                           capture_output=True, text=True, timeout=timeout)
+        payload = r.stdout.strip()
+    except (subprocess.SubprocessError, OSError) as e:
+        errors.append(f"skills.sh: {e}")
+        return []
+    if payload.startswith(("[", "{")):
+        try:
+            hits = json.loads(payload)
+        except ValueError:
+            hits = None
+        if isinstance(hits, dict):
+            hits = hits.get("results") or hits.get("skills") or []
+        if isinstance(hits, list):
+            out = []
+            for h in hits:
+                name = h.get("name") or h.get("skill")
+                owner = h.get("owner") or h.get("repo") or ""
+                if not name:
+                    continue
+                out.append({
+                    "name": name,
+                    "type": h.get("type") or "skill",
+                    "description": h.get("description") or "",
+                    "source_url": h.get("url") or h.get("source_url") or "",
+                    "install": [f"npx skills add {owner}@{name} -g -y"] if owner else [],
+                    "catalog": "skills.sh",
+                    "catalog_type": "cli-registry",
+                    "matched_terms": [term],
+                    "installs": h.get("installs") or h.get("install_count"),
+                    "stars": h.get("stars"),
+                })
+            return out
+    # Human text — parse strictly (registry-verbatim tokens only).
+    return parse_skills_sh_text(payload, term)
+
+
 def search_skills_sh(terms: list[str], errors: list[str], timeout: int = 60) -> list[dict]:
     if not shutil.which("npx"):
         return []
     out: list[dict] = []
     seen: set[str] = set()
-    for term in terms:
-        try:
-            r = subprocess.run(["npx", "skills", "find", term, "--json"],
-                               capture_output=True, text=True, timeout=timeout)
-            payload = r.stdout.strip()
-            hits = json.loads(payload) if payload.startswith(("[", "{")) else None
-        except (subprocess.SubprocessError, ValueError, OSError) as e:
-            errors.append(f"skills.sh: {e}")
-            continue
-        if hits is None:
-            # CLI returned human text, not JSON — leave to the live session
-            # rather than risk a mis-parse that could invent a name.
-            errors.append("skills.sh: non-JSON output; query live via `npx skills find`")
-            continue
-        if isinstance(hits, dict):
-            hits = hits.get("results") or hits.get("skills") or []
-        for h in hits if isinstance(hits, list) else []:
-            name = h.get("name") or h.get("skill")
-            owner = h.get("owner") or h.get("repo") or ""
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            install = []
-            if owner and name:
-                install = [f"npx skills add {owner}@{name} -g -y"]
-            out.append({
-                "name": name,
-                "type": h.get("type") or "skill",
-                "description": h.get("description") or "",
-                "source_url": h.get("url") or h.get("source_url") or "",
-                "install": install,
-                "catalog": "skills.sh",
-                "catalog_type": "cli-registry",
-                "matched_terms": [term],
-                "installs": h.get("installs") or h.get("install_count"),
-                "stars": h.get("stars"),
-            })
+    # One npx process per term is network-bound — run them concurrently.
+    with ThreadPoolExecutor(max_workers=min(4, max(1, len(terms)))) as ex:
+        for hits in ex.map(lambda t: _skills_sh_one_term(t, errors, timeout), terms):
+            for h in hits:
+                if h["name"] in seen:
+                    continue
+                seen.add(h["name"])
+                out.append(h)
     return out
 
 
 # --------------------------------------------------------------------------
 # Dedupe + filter (pure — unit-testable)
 # --------------------------------------------------------------------------
+def _sort_score(h: dict):
+    """More matched terms is better, but real-world adoption counts too:
+    marketplace descriptions match many generic words ('commit', 'workflow'),
+    while a skills.sh hit matches one term yet carries an install count. The
+    boost keeps a popular, on-topic registry skill from being pushed out by
+    incidental multi-word matches."""
+    installs = h.get("installs") or 0
+    boost = 2 if installs >= 1000 else (1 if installs >= 50 else 0)
+    return (-(len(h.get("matched_terms", [])) + boost), -installs, _norm(h.get("name")))
+
+
 def dedupe_and_filter(hits: list[dict], installed: set[str], ignored: set[str]) -> list[dict]:
     """Drop installed/ignored names; dedupe by name keeping the highest-ranked
     source. Merges matched_terms across duplicates. Never adds a hit."""
@@ -207,7 +284,7 @@ def dedupe_and_filter(hits: list[dict], installed: set[str], ignored: set[str]) 
             if rank > _SOURCE_RANK.get(cur.get("catalog_type"), 0):
                 best[key] = dict(h)
             best[key]["matched_terms"] = merged
-    return sorted(best.values(), key=lambda h: (-len(h.get("matched_terms", [])), _norm(h.get("name"))))
+    return sorted(best.values(), key=_sort_score)
 
 
 # --------------------------------------------------------------------------
@@ -236,13 +313,67 @@ def search(scan: dict, terms: list[str]) -> dict:
     return {"candidates": candidates, "needs_live_probe": needs_live_probe, "errors": errors}
 
 
+def _trim_with_diversity(cands: list[dict], top: int) -> list[dict]:
+    """Trim to `top`, but never let the cut erase a whole source: if skills.sh
+    (cli-registry) returned hits and none survived the head, swap the tail for
+    the registry's best two. Registry hits carry install counts the ranking
+    rules need, so dropping them all loses real signal."""
+    head = cands[:top]
+    if any(c.get("catalog_type") == "cli-registry" for c in head):
+        return head
+    registry = [c for c in cands if c.get("catalog_type") == "cli-registry"][:2]
+    if not registry:
+        return head
+    return head[: max(0, top - len(registry))] + registry
+
+
+def _job_terms(job: str) -> list[str]:
+    """A job is a comma-separated list of search PHRASES ('git safety, commit
+    push'). Phrases stay whole — skills.sh ranks 'git safety' far better than
+    'git' and 'safety' separately, and marketplace matching ANDs the words of
+    a phrase anyway. No commas -> the whole job string is one phrase."""
+    return [t.strip() for t in job.split(",") if t.strip()]
+
+
+def search_batch(scan: dict, jobs: list[str], top: int) -> dict:
+    """Run one search() per job concurrently; trim each job to `top` candidates.
+    Jobs are independent fan-outs, so the npx/wp latency overlaps instead of
+    stacking."""
+    with ThreadPoolExecutor(max_workers=min(6, max(1, len(jobs)))) as ex:
+        results = list(ex.map(lambda j: search(scan, _job_terms(j)), jobs))
+    out_jobs = []
+    errors: list[str] = []
+    probes = {p.get("name"): p for r in results for p in r.get("needs_live_probe", [])}
+    for job, r in zip(jobs, results):
+        cands = _trim_with_diversity(r.get("candidates", []), top)
+        # Compact: long descriptions blow up the live session's context.
+        for c in cands:
+            if len(c.get("description") or "") > 220:
+                c["description"] = c["description"][:217] + "..."
+        out_jobs.append({"job": job, "candidates": cands})
+        errors += r.get("errors", [])
+    return {"jobs": out_jobs,
+            "needs_live_probe": sorted(probes.values(), key=lambda p: str(p.get("name"))),
+            "errors": sorted(set(errors))}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="skills-daimon catalog search (verified candidates only)")
     ap.add_argument("--scan", required=True, help="scan.py JSON path")
-    ap.add_argument("--terms", nargs="+", required=True, help="job query terms")
+    ap.add_argument("--terms", nargs="+", help="job query terms (single-job mode)")
+    ap.add_argument("--jobs",
+                    help='pipe-separated jobs; commas separate phrases within a job, '
+                         'e.g. "git safety, commit push|sql query, data analysis"')
+    ap.add_argument("--top", type=int, default=6, help="max candidates per job (batch mode)")
     args = ap.parse_args()
+    if not args.terms and not args.jobs:
+        ap.error("one of --terms or --jobs is required")
     scan = json.loads(Path(args.scan).read_text())
-    out = search(scan, args.terms)
+    if args.jobs:
+        jobs = [j.strip() for j in args.jobs.split("|") if j.strip()]
+        out = search_batch(scan, jobs, args.top)
+    else:
+        out = search(scan, args.terms)
     json.dump(out, sys.stdout)
     sys.stdout.write("\n")
     return 0

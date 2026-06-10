@@ -26,10 +26,23 @@ installs anything. Only `npx skills find` is in the allowlist (read-only query).
 
 ## Mandatory execution order (two gates can terminate the run)
 
-1. **Run `scan.py`** (Step 1).
-2. **GATE A — empty session data.** Read `session_count`. **If `== 0`: STOP.** Tell the user there's no recent session data. Do not cluster, query catalogs, render, or append history.
-3. **GATE B — no catalogs.** Read `available_catalogs`. **If empty: emit zero catalog-backed recommendations** and tell the user to add a marketplace (`/plugin marketplace add anthropics/claude-plugins-official`) or install Node so `npx skills` works. Coaching from local signals may still run.
-4. Only if both gates pass: cluster jobs (Step 2), query every catalog (Step 3), output report (Step 4), coach (Step 5), render HTML (Step 6), append history (Step 7).
+**Fast path (default — 3 calls):**
+
+1. **`run.py`** — wraps scan + analyze + staging + trends. Prints a slim JSON:
+   `gates` (`session_count`, `catalogs`), `paths` (workdir, `scan.json`,
+   `analysis.json`, staged `payload.json` + `snapshot.json`), the
+   `markdown_skeleton`, `job_signals` (work mix, top bash verbs, top MCP calls,
+   recurring prompts, web fetches), and `trends` (`distinct_days` + ready
+   "vs last run" rows). Read `paths.analysis` only if you need a field the
+   summary doesn't carry.
+2. **GATE A — empty session data.** `gates.session_count == 0` → **STOP.** Tell the user there's no recent session data. Do not cluster, query catalogs, render, or append history.
+3. **GATE B — no catalogs.** `gates.catalogs` empty → **emit zero catalog-backed recommendations** and tell the user to add a marketplace (`/plugin marketplace add anthropics/claude-plugins-official`) or install Node so `npx skills` works. Coaching from local signals may still run.
+4. Cluster jobs (Step 2), then **one batch catalog call** (Step 3, `--jobs`),
+   probe `needs_live_probe` MCP catalogs, then **`finalize.py`** (merge fill +
+   render + history in one call), then print the report.
+
+`scan.py`, `analyze.py`, `render_report.py`, `history.py` remain runnable
+standalone (debugging, partial reruns); the gates are identical either way.
 
 A job with **no real catalog match** is routed to "Worth building yourself" — never a forced/weak recommendation.
 
@@ -71,13 +84,24 @@ area where the user spends the most time/tokens; serve non-dev work too.
 
 ## Step 3 — query every available catalog
 
-**Fast path:** `python3 ${CLAUDE_SKILL_DIR}/bin/catalog_search.py --scan <scan.json>
---terms "<job tag 1>" "<job tag 2>" ...` returns **verified candidates only**
-(marketplace + cli-provider + skills.sh-when-JSON), already deduped and with
-installed/ignored names dropped. It never invents. Its output also carries
-`needs_live_probe` (the `mcp-server` catalogs it can't reach) and `errors` (e.g.
-skills.sh returned human text) — handle both yourself below. Then pick one winner
-per job from `candidates` using the ranking rules in "Combine results".
+**Fast path (batch — one call for all jobs):**
+`python3 ${CLAUDE_SKILL_DIR}/bin/catalog_search.py --scan <scan.json>
+--jobs "<job 1 phrase, phrase>|<job 2 phrase>|..." --top 6` runs every job in
+parallel. `|` separates jobs; commas separate search phrases within a job —
+keep phrases whole ("git safety", not "git" + "safety": registries rank
+phrases far better, and marketplace matching ANDs a phrase's words anyway).
+It
+and returns `{"jobs": [{job, candidates}], "needs_live_probe", "errors"}` —
+**verified candidates only** (marketplace + cli-provider + skills.sh), already
+deduped, trimmed to `--top`, with installed/ignored names dropped. It never
+invents: skills.sh's human output is parsed with a strict registry-shape
+regex, so every name/URL/install command is verbatim from the registry.
+`needs_live_probe` lists the `mcp-server` catalogs only the live session can
+reach — probe those yourself below. Then pick one winner per job from its
+`candidates` using the ranking rules in "Combine results".
+
+Single-job mode (`--terms "<job tag>" ...`) still works and returns the flat
+`{"candidates": ...}` shape.
 
 Otherwise, or to cover what the helper flagged, query by hand. Loop over **every**
 entry in `available_catalogs`. Same matching logic, different lookup tool. Query
@@ -100,7 +124,7 @@ If nothing clearly matches → "Worth building yourself". **Use the right label*
 ## Step 3.5 — fetch full details for final picks
 
 - **CLI-provider hit:** `<tool> get slug=<slug> repo_key=<repo_key>` → full SKILL.md.
-- **skills.sh hit:** find result already carries name/description/installs/stars — enough. Full SKILL.md if wanted: `https://www.skills.sh/<owner>/<repo>/<skill>`.
+- **skills.sh hit:** find result carries name/installs (description/stars when the CLI emits JSON; text-parsed hits have an empty description — describe the pick from its name + registry data, or read `https://www.skills.sh/<owner>/<repo>/<skill>` for the full SKILL.md; never invent a description).
 - **Marketplace hit:** read the entry from `marketplace_json`. Capture `homepage` as `source_url` (fall back to `source.url`). If cached at `~/.claude/plugins/marketplaces/<mp>/<plugin>/`, read its README/SKILL.md.
 
 Install command rules:
@@ -110,18 +134,33 @@ Install command rules:
 
 If `get` fails for a cli-provider pick, fall back to the search description and flag `Install: see source_url` (unverified).
 
-## Step 6 — render the HTML companion
+## Step 6 — finalize (merge + render + history, one call)
 
-Assemble a payload JSON (from `analyze.py` output + scan counts) and run:
+Write `fill.json` with only what the live session adds:
 
-```bash
-python3 ${CLAUDE_SKILL_DIR}/bin/render_report.py /tmp/skills-daimon-payload.json
+```json
+{"recommendations": [{"rank": 1, "confidence": "high", "type": "skill",
+                      "name": "...", "job": "...", "evidence": "...",
+                      "description": "...", "install": ["..."],
+                      "source_url": "..."}],
+ "gaps": [{"tag": "...", "note": "...", "init": "npx skills init ..."}]}
 ```
 
-It writes `~/.claude/skills/skills-daimon/reports/skills-daimon-<date>.html` and
-prints `{"path","url"}`. Link the `url` at the very top of the markdown report.
-If rendering fails, skip the link silently — the markdown report stands alone.
-The HTML is fully self-contained (inline CSS + SVG, no network).
+Then:
+
+```bash
+python3 ${CLAUDE_SKILL_DIR}/bin/finalize.py --fill fill.json
+```
+
+It merges the fill into the staged `payload.json` (from `run.py`'s workdir;
+override with `--workdir`), renders the HTML, appends the history snapshot, and
+prints `{"url","path","history"}`. The `url` becomes the **first line** of the
+markdown report. If rendering fails, skip the link silently — the markdown
+report stands alone. The HTML is fully self-contained (inline CSS + SVG, no
+network).
+
+Manual fallback: `render_report.py <payload.json>` + `history.py append
+<snapshot.json>` still work for partial reruns.
 
 Payload schema (authoritative version in `bin/render_report.py` docstring):
 - `meta`: `{days, sessions, projects, date, catalogs}` (date = today, ISO).

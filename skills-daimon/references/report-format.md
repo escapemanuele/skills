@@ -3,10 +3,27 @@
 Use this template. Keep it scannable, specific, honest. `analyze.py` builds the
 skeleton; fill catalog-backed sections from live catalog results.
 
-```
-# Skills Daimon — last {window_days} days
+## Output hygiene (why the report reads clean)
 
-📊 **Visual report:** <file:// URL printed by render_report.py> *(open in a browser)*
+The report is the deliverable — the user judges the whole run by how the final
+message reads. So:
+
+- **The very first line of the final message is the visual-report link** — before
+  the title, before anything else. The user opens the HTML first; burying the
+  link defeats it.
+- **The final message contains the report and nothing else.** No pipeline
+  narration ("Running scan…", "Querying catalogs…"), no raw JSON, no tool noise,
+  no trailing commentary after Trends. Status notes belong between tool calls,
+  not in the report.
+- **Every section is separated by `---`** and appears in template order. Skip a
+  section entirely if it has no content — never leave an empty heading.
+- Keep tables narrow and aligned; one idea per line; no nested bullets deeper
+  than one level.
+
+```
+📊 **Visual report:** <file:// URL printed by render_report.py> — *open in a browser*
+
+# Skills Daimon — last {window_days} days
 
 ## 🏛  Verdict: <one named verdict from the ladder>
 
