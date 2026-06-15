@@ -1280,13 +1280,26 @@ SD_SIZES = {
 }
 
 
+def _intro_label(title: str) -> str:
+    """'You're a' reads wrong when the archetype already carries an article
+    ('The Builder-Scribe' → 'You're a The …'). Drop the article in that case."""
+    first = title.strip().split(" ", 1)[0].lower()
+    return "You’re" if first in {"the", "a", "an"} else "You’re a"
+
+
+def _pill_width(pill: str, per_char: int, pad: int, floor: int) -> int:
+    """Snug pill — the old generous per-char estimate ballooned the capsule."""
+    return max(floor, per_char * len(pill) + pad)
+
+
 def _card_vertical(cfg: dict, sid: str, sessions: str, days: int, title: str,
                    tagline: str, mix_txt: str, pill: str) -> str:
     """Hero-number identity card, vertical (square / story). One focal point:
     the oversized session count in gradient numerals."""
     w, h = cfg["w"], cfg["h"]
     cx = w // 2
-    pill_w = max(360, 26 * len(pill))
+    intro = _intro_label(title)
+    pill_w = _pill_width(pill, 15, 64, 300)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" '
         f'width="{w}" height="{h}" font-family="{SD_CARD_FONT}">'
@@ -1304,7 +1317,7 @@ def _card_vertical(cfg: dict, sid: str, sessions: str, days: int, title: str,
         f'fill="{SD_INK_SOFT}">in {_int(days)} days</text>'
         # Identity
         f'<text x="{cx}" y="{cfg["youre"]}" text-anchor="middle" font-size="30" '
-        f'fill="{SD_INK_SOFT}">You’re a</text>'
+        f'fill="{SD_INK_SOFT}">{intro}</text>'
         f'<text x="{cx}" y="{cfg["title"]}" text-anchor="middle" font-size="{cfg["title_fs"]}" '
         f'font-weight="800" fill="{SD_INK}">{title}</text>'
         f'<text x="{cx}" y="{cfg["tag"]}" text-anchor="middle" font-size="30" '
@@ -1330,7 +1343,8 @@ def _card_horizontal(cfg: dict, sid: str, sessions: str, days: int, title: str,
     w, h = cfg["w"], cfg["h"]
     lx = 300            # left column center (hero)
     rcx = 850           # right column center (identity) — 500px-wide column
-    pill_w = max(320, 22 * len(pill))
+    intro = _intro_label(title)
+    pill_w = _pill_width(pill, 14, 56, 280)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" '
         f'width="{w}" height="{h}" font-family="{SD_CARD_FONT}">'
@@ -1349,7 +1363,7 @@ def _card_horizontal(cfg: dict, sid: str, sessions: str, days: int, title: str,
         f'<line x1="585" y1="170" x2="585" y2="470" stroke="{SD_INK}" stroke-opacity="0.2"/>'
         # Identity (right, center-anchored)
         f'<text x="{rcx}" y="220" text-anchor="middle" font-size="26" '
-        f'fill="{SD_INK_SOFT}">You’re a</text>'
+        f'fill="{SD_INK_SOFT}">{intro}</text>'
         f'<text x="{rcx}" y="280" text-anchor="middle" font-size="50" font-weight="800" '
         f'fill="{SD_INK}">{title}</text>'
         f'<text x="{rcx}" y="324" text-anchor="middle" font-size="25" font-style="italic" '

@@ -34,6 +34,23 @@ class TestTopMix(unittest.TestCase):
         self.assertEqual(rr._top_mix({}), "")
 
 
+class TestIntroLabel(unittest.TestCase):
+    def test_drops_article_when_title_has_one(self):
+        self.assertEqual(rr._intro_label("The Builder-Scribe"), "You’re")
+        self.assertEqual(rr._intro_label("A Tinkerer"), "You’re")
+        self.assertEqual(rr._intro_label("An Architect"), "You’re")
+
+    def test_keeps_article_otherwise(self):
+        self.assertEqual(rr._intro_label("Builder-Scribe"), "You’re a")
+        self.assertEqual(rr._intro_label("Theorist"), "You’re a")  # not "the"
+
+    def test_no_double_article_in_card(self):
+        svg = rr.build_share_card_svg({"title": "The Builder-Scribe", "tagline": "t"},
+                                      MIX, 475, 28, 4, 3, False, size="link")
+        self.assertNotIn("You’re a</text><text", svg)  # sanity: label rendered
+        self.assertNotIn("a The", svg.replace("\n", " "))
+
+
 class TestBuildCard(unittest.TestCase):
     def _card(self, size):
         return rr.build_share_card_svg(ARCH, MIX, 475, 28, 4, 3, False, size=size)
