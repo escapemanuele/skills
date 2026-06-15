@@ -1802,7 +1802,8 @@ def main() -> int:
     payload = redact_in(payload)
 
     date = payload.get("meta", {}).get("date") or _dt.date.today().isoformat()
-    out_dir = Path.home() / ".claude" / "skills" / "skills-daimon" / "reports"
+    from _paths import skill_data_dir  # noqa: E402
+    out_dir = skill_data_dir() / "reports"
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"skills-daimon-{date}.html"
     out.write_text(redact_in(render(payload)), encoding="utf-8")

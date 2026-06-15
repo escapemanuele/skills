@@ -40,9 +40,10 @@ from pathlib import Path
 # Shared secret redactor.
 sys.path.insert(0, str(Path(__file__).parent))
 from redact import redact_in  # noqa: E402
+from _paths import skill_data_dir  # noqa: E402
 
 
-HISTORY_PATH = Path.home() / ".claude" / "skills" / "skills-daimon" / "history.jsonl"
+HISTORY_PATH = skill_data_dir() / "history.jsonl"
 
 
 # Numeric-only fields we accept in scorecard. Strings drop silently so we

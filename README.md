@@ -54,6 +54,23 @@ Then run it:
 
 It takes optional flags: `/skills-daimon --days 28 --full` (window size, plus `--compact`/`--normal`/`--full` detail).
 
+## Using Codex instead of Claude Code
+
+skills-daimon also reads OpenAI Codex sessions (`~/.codex/sessions`). Install it as a Codex skill:
+
+```bash
+git clone https://github.com/escapemanuele/skills.git /tmp/eb-skills
+cd /tmp/eb-skills/skills-daimon && ./install-codex.sh
+```
+
+This copies the scripts into `~/.codex/skills/skills-daimon/` with a Codex-native `SKILL.md`. Then run `skills-daimon` in Codex, or directly:
+
+```bash
+python3 ~/.codex/skills/skills-daimon/bin/run.py --days 28 --source codex
+```
+
+`--source auto` (the default) picks Codex when no Claude Code sessions are present, so a Codex-only machine needs no flag. Reports and history land under `~/.codex/skills/skills-daimon/` (override with `SKILLS_DAIMON_HOME`). Codex has no per-session outcome labels, so the "finished %" rows read no-data — expected. Only `python3` is required; `npx` unlocks the live skills.sh registry query.
+
 ## The three skills
 
 This repo is the `skills-daimon` plugin (`.claude-plugin/plugin.json`). It ships three skills that work as a loop: the report finds the problem, the siblings fix it.

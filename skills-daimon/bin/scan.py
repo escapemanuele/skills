@@ -159,7 +159,8 @@ def _cmd_summary(cmd: str) -> str:
     head = " ".join(parts[:3])[:40]
     return head + " …" if len(parts) > 3 else head
 
-IGNORED_FILE = Path.home() / ".claude" / "skills" / "skills-daimon" / ".ignored.json"
+from _paths import skill_data_dir  # noqa: E402
+IGNORED_FILE = skill_data_dir() / ".ignored.json"
 
 
 def load_ignored() -> list[str]:
