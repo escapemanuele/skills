@@ -37,6 +37,30 @@ import scan as _scan
 
 CODEX_HOME = Path.home() / ".codex"
 ROLLOUT_GLOBS = ("sessions/**/rollout-*.jsonl", "archived_sessions/rollout-*.jsonl")
+# An exec_command output this large (untruncated tokens) floods the context.
+LARGE_OUTPUT_TOKENS = 10000
+
+
+def _codex_memory_store_count() -> int:
+    """Rough count of stored Codex memories (memories/ files + memories_*.sqlite
+    rows), for the memory-usage signal. Best-effort; never raises."""
+    n = 0
+    mem_dir = CODEX_HOME / "memories"
+    if mem_dir.is_dir():
+        n += sum(1 for _ in mem_dir.glob("**/*") if _.is_file())
+    import sqlite3
+    for db in CODEX_HOME.glob("memories*.sqlite"):
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            for tbl in ("stage1_outputs",):
+                try:
+                    n += con.execute(f'SELECT count(*) FROM "{tbl}"').fetchone()[0]
+                except sqlite3.Error:
+                    pass
+            con.close()
+        except sqlite3.Error:
+            continue
+    return n
 
 
 def _iter_rollouts(root: Path, max_age_days: int):
@@ -117,6 +141,9 @@ def _scan_one(path: Path) -> dict:
     lines_added = lines_removed = 0
     committed = pushed = False
     out_by_call: dict[str, str] = {}
+    patch_failures = 0
+    large_outputs = 0
+    has_memory = False
 
     for line in path.read_text(errors="replace").splitlines():
         line = line.strip()
@@ -176,8 +203,12 @@ def _scan_one(path: Path) -> dict:
                 for f in (p.get("changes") or {}):
                     files_modified.add(f)
                     edited_exts.append(_ext(f))
+                if p.get("success") is False:
+                    patch_failures += 1
+            elif pt == "agent_message" and p.get("memory_citation"):
+                has_memory = True   # the agent cited a stored Codex memory
 
-    # exec_command exit codes from the matching outputs.
+    # exec_command exit codes + oversized outputs from the matching outputs.
     for out in out_by_call.values():
         m = re.search(r"exited with code (\d+)", out)
         if m:
@@ -185,6 +216,9 @@ def _scan_one(path: Path) -> dict:
                 exec_ok += 1
             else:
                 exec_err += 1
+        mt = re.search(r"Original token count: (\d+)", out)
+        if mt and int(mt.group(1)) >= LARGE_OUTPUT_TOKENS:
+            large_outputs += 1
     cmds = [c for _, c in cmd_events]
     for c in cmds:
         if re.search(r"\bgit\s+commit\b", c):
@@ -199,7 +233,8 @@ def _scan_one(path: Path) -> dict:
         "files_modified": files_modified, "edited_exts": edited_exts,
         "mcp_names": mcp_names, "lines_added": lines_added,
         "lines_removed": lines_removed, "committed": committed, "pushed": pushed,
-        "file": path.name,
+        "patch_failures": patch_failures, "large_outputs": large_outputs,
+        "has_memory": has_memory, "file": path.name,
     }
 
 
@@ -287,6 +322,7 @@ def scan_codex(root: Path, max_age_days: int, cwd: Path | None = None,
     files_modified: set[str] = set()
     commits = pushes = 0
     lines_added = lines_removed = 0
+    patch_failures = large_outputs = mem_sessions = 0
     work_mix_counts = collections.Counter()
     proj_signal: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
     stuck_loops: list[dict] = []
@@ -298,6 +334,8 @@ def scan_codex(root: Path, max_age_days: int, cwd: Path | None = None,
         files_modified |= s["files_modified"]
         commits += int(s["committed"]); pushes += int(s["pushed"])
         lines_added += s["lines_added"]; lines_removed += s["lines_removed"]
+        patch_failures += s["patch_failures"]; large_outputs += s["large_outputs"]
+        mem_sessions += int(s["has_memory"])
         path = s["cwd"] or "(unknown)"
         projects[path] += 1
         proj_tokens[path] += s["tokens"]
@@ -370,6 +408,9 @@ def scan_codex(root: Path, max_age_days: int, cwd: Path | None = None,
             "raw_http_hosts": dict(raw_http.most_common(10)),
             "sleep_calls": sleep_calls,
             "hot_repos_without_claudemd": [],
+            # Codex-native signals (absent for Claude scans → cards don't fire).
+            "large_exec_outputs": large_outputs,
+            "patch_failures": patch_failures,
         },
         # No Anthropic outcome facets in Codex — empty coverage degrades cleanly.
         "outcomes": {"by_facet": {}, "friction_sessions": {},
@@ -384,8 +425,9 @@ def scan_codex(root: Path, max_age_days: int, cwd: Path | None = None,
                                                     "total": session_count},
         },
         "tool_errors": {"Bash": {"ok": exec_ok, "error": exec_err}},
-        "memory_events": {"remember_invocations": 0, "memory_file_edits": 0,
-                          "sessions_with_memory": 0},
+        "memory_events": {"remember_invocations": 0,
+                          "memory_file_edits": _codex_memory_store_count(),
+                          "sessions_with_memory": mem_sessions},
         "stuck_loops": stuck_loops,
         "available_catalogs": catalogs,
         "installed_skills": _discover_codex_installed(), "installed_plugins": [],

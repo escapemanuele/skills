@@ -164,6 +164,63 @@ class TestRicherSignals(unittest.TestCase):
         self.assertEqual(out["stuck_loops"], [])
 
 
+class TestCodexNativeSignals(unittest.TestCase):
+    def _scan(self, lines):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        d = Path(tmp.name) / "sessions" / "2026" / "06" / "10"
+        d.mkdir(parents=True)
+        (d / "rollout-n.jsonl").write_text(_rollout(lines))
+        return scan_codex.scan_codex(Path(tmp.name), max_age_days=3650)
+
+    def test_large_output_counted(self):
+        out = self._scan([
+            {"type": "session_meta", "payload": {"cwd": "/p"}},
+            _ri("function_call", name="exec_command",
+                arguments=json.dumps({"cmd": "cat huge.log"}), call_id="c1"),
+            _ri("function_call_output", call_id="c1",
+                output="Original token count: 25000\nOutput:\n...big..."),
+            _ri("function_call", name="exec_command",
+                arguments=json.dumps({"cmd": "pwd"}), call_id="c2"),
+            _ri("function_call_output", call_id="c2",
+                output="Original token count: 8\nOutput:\n/p"),
+        ])
+        self.assertEqual(out["coaching_signals"]["large_exec_outputs"], 1)
+
+    def test_patch_failure_counted(self):
+        out = self._scan([
+            {"type": "session_meta", "payload": {"cwd": "/p"}},
+            _em("patch_apply_end", success=False, changes={}),
+            _em("patch_apply_end", success=True, changes={"/p/a.py": {}}),
+        ])
+        self.assertEqual(out["coaching_signals"]["patch_failures"], 1)
+
+    def test_memory_citation_marks_session(self):
+        out = self._scan([
+            {"type": "session_meta", "payload": {"cwd": "/p"}},
+            _em("agent_message", message="recalling earlier",
+                memory_citation={"id": "m1"}),
+        ])
+        self.assertEqual(out["memory_events"]["sessions_with_memory"], 1)
+
+    def test_codex_signals_feed_analyze(self):
+        import analyze
+        out = self._scan([
+            {"type": "session_meta", "payload": {"cwd": "/p"}},
+        ] + sum(([
+            _ri("function_call", name="exec_command",
+                arguments=json.dumps({"cmd": f"cat f{i}"}), call_id=f"c{i}"),
+            _ri("function_call_output", call_id=f"c{i}",
+                output="Original token count: 20000\n"),
+        ] for i in range(3)), []) + [
+            _em("patch_apply_end", success=False, changes={}),
+            _em("patch_apply_end", success=False, changes={}),
+        ])
+        an = analyze.analyze(out)
+        self.assertTrue(any("oversized" in t["title"].lower() for t in an["token_tips"]))
+        self.assertTrue(any("patch" in c["title"].lower() for c in an["coaching_cards"]))
+
+
 class TestSourceAwareInstall(unittest.TestCase):
     def test_codex_flags_marketplace_nonportable(self):
         import catalog_search as cs

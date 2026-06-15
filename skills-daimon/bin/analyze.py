@@ -139,8 +139,14 @@ def compute_metrics(scan: dict) -> dict:
 
     stuck = scan.get("stuck_loops") or []
 
+    # Codex-native signals (absent on Claude scans → these stay 0 and gate off).
+    large_exec_outputs = _int(cs.get("large_exec_outputs"))
+    patch_failures = _int(cs.get("patch_failures"))
+
     return {
         "session_count": session_count,
+        "large_exec_outputs": large_exec_outputs,
+        "patch_failures": patch_failures,
         "labeled": labeled,
         "total": total,
         "finished": finished,
@@ -537,6 +543,17 @@ def build_coaching(m: dict) -> list[dict]:
             "handoff": _NO_INSTALL,
         })
 
+    # Codex-native: apply_patch failures (gated; 0 on Claude scans).
+    if m.get("patch_failures", 0) >= 2:
+        cards.append({
+            "title": "Patches keep failing to apply",
+            "hard_count": f"{m['patch_failures']} apply_patch attempts failed in the window",
+            "saw": "Edits were rejected because the patch context didn't match the file.",
+            "matters": "Each failed patch burns a turn and re-sends the file to retry.",
+            "better": "Read the exact lines right before editing so the patch context is current.",
+            "handoff": _NO_INSTALL,
+        })
+
     return cards[:3]
 
 
@@ -611,6 +628,15 @@ def build_token_tips(m: dict) -> list[dict]:
                         "in tight succession",
             "tip": "Each repeat re-streams the same output into context. After the second "
                    "identical failure, change the approach instead of retrying.",
+        })
+
+    # Codex-native: oversized command outputs flood context (gated; 0 on Claude).
+    if m.get("large_exec_outputs", 0) >= 3:
+        tips.append({
+            "title": "Tame oversized command outputs",
+            "evidence": f"{m['large_exec_outputs']} commands returned 10k+ tokens of output",
+            "tip": "Whole-file dumps and noisy logs land in context in full. Pipe through "
+                   "head/grep/sed or cap with a smaller max_output_tokens to keep only what matters.",
         })
 
     # A failed command still costs its output, then you pay again on the retry.
