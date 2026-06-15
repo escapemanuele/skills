@@ -1007,6 +1007,10 @@ function sdPickSvg(){
   var t=document.getElementById('sd-card-'+size)||document.getElementById('sd-card-square');
   return t?t.innerHTML.trim():'';
 }
+function sdSwapPreview(){
+  var box=document.getElementById('sd-preview'); if(!box)return;
+  box.innerHTML=sdPickSvg();
+}
 function sdSvgToPng(svg){
   return new Promise(function(resolve,reject){
     var m=svg.match(/viewBox=\\"0 0 (\\d+) (\\d+)\\"/);
@@ -1521,14 +1525,14 @@ def simple_view(payload: dict, m: dict, grove_html: str,
             f'{templates}'
             '<details class="share-preview"><summary>Preview &amp; pick a size</summary>'
             '<div class="share-sizes"><label for="sd-size">Size</label>'
-            '<select id="sd-size">'
+            '<select id="sd-size" onchange="sdSwapPreview()">'
             '<option value="square">Square · 1080×1080 (feed)</option>'
             '<option value="story">Story · 1080×1920 (IG/TikTok)</option>'
             '<option value="link">Link · 1200×630 (X/LinkedIn)</option>'
             '</select>'
             '<button class="viewtoggle" onclick="sdDownloadCard()">Download PNG</button>'
             '</div>'
-            f'{preview_svg}'
+            f'<div id="sd-preview">{preview_svg}</div>'
             '<p class="share-hint">Exports as PNG — one tap opens your share sheet '
             'with a caption ready. Aggregate only; no project names or counts. '
             'Nothing is uploaded.</p>'
