@@ -956,6 +956,7 @@ SIMPLE_CSS = """
 .simple-coach .scwhat b,.simple-coach .scwhy b,.simple-coach .scbetter b{color:#171717}
 .simple-coach .scbetter{color:#171717;margin:0 0 4px}
 .simple-coach .scsaw{color:#6B7280;font-size:13px;margin:0}
+.simple-token{border-left:3px solid #0F766E}
 .simple-note{color:#6B7280;font-size:13px;margin:0 0 10px}
 .simple-foot{text-align:center;color:#9CA3AF;font-size:12px;margin-top:26px}
 #view-advanced .viewbar{margin:0 0 16px}
@@ -1491,6 +1492,24 @@ def simple_coach_block(coaching: list) -> str:
     return '<section><h2 class="sec">⚑ Habits to tweak</h2>' + "".join(cards) + '</section>'
 
 
+def simple_token_block(token_tips: list) -> str:
+    """Token-cost tips — each cites a hard count and names a cheaper habit."""
+    if not token_tips:
+        return ""
+    cards = []
+    for t in token_tips:
+        cards.append(
+            '<div class="card simple-coach simple-token">'
+            f'<h4>{esc(t.get("title", ""))}</h4>'
+            f'<p class="scbetter"><b>Try this.</b> {esc(t.get("tip", ""))}</p>'
+            f'<p class="scsaw">{esc(t.get("evidence", ""))}</p>'
+            '</div>'
+        )
+    return ('<section><h2 class="sec">💸 Trim token usage</h2>'
+            '<p class="simple-note">Cheaper habits that keep context small — '
+            'each tied to a real count.</p>' + "".join(cards) + '</section>')
+
+
 def simple_view(payload: dict, m: dict, grove_html: str,
                 share_cards: dict | None = None, share_caption: str = "") -> str:
     """The default, easy-to-scan view: Primary action · Recommendations ·
@@ -1503,6 +1522,7 @@ def simple_view(payload: dict, m: dict, grove_html: str,
     pa = simple_primary_action_card(payload.get("primary_action") or {})
     recs = simple_recs_block(payload.get("recommendations") or [])
     coach = simple_coach_block(payload.get("coaching") or [])
+    token = simple_token_block(payload.get("token_tips") or [])
 
     # Share card: opt-in, leak-free. Each size's SVG lives in a non-rendered
     # <template>; JS rasterizes the picked size to PNG and opens the native
@@ -1548,7 +1568,7 @@ def simple_view(payload: dict, m: dict, grove_html: str,
         + '<button class="viewtoggle" id="view-toggle" onclick="sdToggleView()">Advanced view →</button>'
         + '</div>'
         '</div>'
-        + arch_html + share_block + pa + recs + coach + (grove_html or "")
+        + arch_html + share_block + pa + recs + coach + token + (grove_html or "")
         + '<div class="simple-foot">🔒 Local only · evidence from your own sessions · nothing left this machine</div>'
         '</div>'
     )

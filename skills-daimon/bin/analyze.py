@@ -580,8 +580,55 @@ def build_history_snapshot(scan: dict, m: dict, scorecard: list[dict], archetype
 # --------------------------------------------------------------------------
 # Markdown report skeleton (recommendations/gaps left as placeholders)
 # --------------------------------------------------------------------------
+def build_token_tips(m: dict) -> list[dict]:
+    """Token-cost tips, each gated on a real count and naming a cheaper path.
+    Only genuine waste with a clear alternative — never count-free editorializing.
+    Cap 3. Each tip: {title, evidence (hard count), tip}."""
+    tips: list[dict] = []
+
+    # Shell search/read pipes whole files into context; the built-ins return
+    # only what matched.
+    if m["bypass_total"] >= 20 and m["bash_total"]:
+        calls = m["bypass_calls"] or {}
+        top = ", ".join(f"{k}×{v}" for k, v in
+                        sorted(calls.items(), key=lambda kv: -_int(kv[1]))[:3])
+        tips.append({
+            "title": "Search with the built-in tools",
+            "evidence": f"{m['bypass_total']} of {m['bash_total']} bash calls were "
+                        f"shell search/read ({m['bypass_pct']}%)" + (f" — {top}" if top else ""),
+            "tip": "Shell grep/cat/find stream entire files into context; Grep/Glob/Read "
+                   "return just the matches. Same answer, a fraction of the tokens.",
+        })
+
+    # A stuck loop re-streams the same output every iteration.
+    if m["stuck_loops"]:
+        top = max(m["stuck_loops"], key=lambda s: _int(s.get("count")))
+        n = len(m["stuck_loops"])
+        loops = "loop" if n == 1 else "loops"
+        tips.append({
+            "title": "Break stuck command loops sooner",
+            "evidence": f"{n} stuck {loops}; one command ran ×{_int(top.get('count'))} "
+                        "in tight succession",
+            "tip": "Each repeat re-streams the same output into context. After the second "
+                   "identical failure, change the approach instead of retrying.",
+        })
+
+    # A failed command still costs its output, then you pay again on the retry.
+    if m["bash_error"] >= 40:
+        tips.append({
+            "title": "Cut the shell error rate",
+            "evidence": f"{m['bash_error']} of {m['bash_ok'] + m['bash_error']} bash calls "
+                        f"errored ({m['bash_error_pct']}%)",
+            "tip": "Every error lands its output in context, then the retry costs it again. "
+                   "Check the path/flags (ls, --help) before running.",
+        })
+
+    return tips[:3]
+
+
 def build_markdown(scan: dict, m: dict, verdict: dict, archetype: dict,
-                   primary: dict, scorecard: list[dict], coaching: list[dict]) -> str:
+                   primary: dict, scorecard: list[dict], coaching: list[dict],
+                   token_tips: list[dict]) -> str:
     days = _int(scan.get("max_age_days")) or 28
     recap = scan.get("work_recap") or {}
     mix = recap.get("mix") or {}
@@ -649,6 +696,15 @@ def build_markdown(scan: dict, m: dict, verdict: dict, archetype: dict,
             L.append(f"**Handoff:** {c.get('handoff', 'No install needed.')}\n")
         L.append("---\n")
 
+    if token_tips:
+        L.append("## 💸 Trim token usage\n")
+        L.append("Cheaper habits that keep context small — each tied to a real count.\n")
+        for t in token_tips:
+            L.append(f"### {t['title']}")
+            L.append(f"**Evidence:** {t['evidence']}")
+            L.append(f"**Try this:** {t['tip']}\n")
+        L.append("---\n")
+
     L.append("## 🛠️ Worth building yourself\n")
     L.append(GAP_PLACEHOLDER + "\n")
     L.append("---\n")
@@ -671,8 +727,10 @@ def analyze(scan: dict) -> dict:
     scorecard = build_scorecard(m)
     archetype = pick_archetype(scan, m)
     coaching = build_coaching(m)
+    token_tips = build_token_tips(m)
     history_snapshot = build_history_snapshot(scan, m, scorecard, archetype)
-    markdown = build_markdown(scan, m, verdict, archetype, primary, scorecard, coaching)
+    markdown = build_markdown(scan, m, verdict, archetype, primary, scorecard,
+                              coaching, token_tips)
 
     meta = {
         "days": _int(scan.get("max_age_days")) or 28,
@@ -695,6 +753,7 @@ def analyze(scan: dict) -> dict:
         "recommendations": [],
         "gaps": [],
         "coaching": coaching_for_render(coaching),
+        "token_tips": token_tips,
         "scorecard": scorecard,
         "work_recap": scan.get("work_recap") or {},
         "charts": {
