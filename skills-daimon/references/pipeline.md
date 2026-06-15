@@ -7,19 +7,22 @@ them you only need the right path to the script itself.
 
 ## allowed-tools tradeoff
 
-SKILL.md ships a narrow allowlist: `Bash(python3 *) Bash(npx skills find *)
-Bash(wp context *) Read`. This covers scan/analyze/render/history (all `python3`),
-the skills.sh registry (`npx skills find`), cli-provider catalogs (`wp context`),
-and reading marketplace JSON / SKILL.md (`Read`).
+SKILL.md ships this allowlist: `Bash(python3 *) Bash(npx skills find *)
+Bash(wp context *) Read mcp__context-a8c__context-a8c-load-provider
+mcp__context-a8c__context-a8c-execute-tool`. This covers scan/analyze/render/
+history (all `python3`), the skills.sh registry (`npx skills find`),
+cli-provider catalogs (`wp context`), reading marketplace JSON / SKILL.md
+(`Read`), and probing `mcp-server` catalogs the scanner discovers (via the two
+generic context-a8c MCP tools).
 
-**It deliberately excludes MCP tools.** The `mcp-server` catalog source (e.g.
-context-a8c's `ai-skills`) therefore degrades to skip-silently — the scanner
-already emits those as *candidates* the live session may or may not be able to
-probe, so this is graceful, not a break. To re-enable MCP catalog probing in an
-environment that has it, add the relevant MCP tool(s) to `allowed-tools` (e.g.
-`mcp__context-a8c__context-a8c-load-provider mcp__context-a8c__context-a8c-execute-tool`).
-MCP tool names are environment-specific, which is why they are not in the
-default allowlist.
+**`mcp-server` catalogs ARE probed by the live session.** A Python subprocess
+can't reach MCP, so `catalog_search.py` emits any discovered `mcp-server`
+catalog as a `needs_live_probe` candidate; the live session then loads its
+provider and runs its `search`/`get` tools per job phrase (Step 3, MCP-server
+bullet). The MCP tool names are environment-specific — whichever ones are in
+`allowed-tools` and connected can be probed; the rest degrade to skip-silently
+(graceful, not a break). Add other MCP tool names to `allowed-tools` to probe
+additional catalogs.
 
 `npx skills add` / `npx skills init` are **printed, not run** — the skill never
 installs anything. Only `npx skills find` is in the allowlist (read-only query).
@@ -111,7 +114,8 @@ sentences).
 - **Marketplace** (`type: "marketplace"`): read `marketplace_json` (top-level `plugins: [...]`, each with `name`, `description`, metadata). Case-insensitive substring match on `name`/`description`/`keywords`. Install: `/plugin install <name>@<marketplace-name>`.
 - **CLI-provider** (`type: "cli-provider"`, e.g. `tool: "wp context <provider>"`): `<tool> search query=<term> limit=10`. Results: `name`, `slug`, `type`, `description`, `repo_key`, `source_url`.
 - **CLI-registry** (skills.sh, `tool: "npx skills find"`): `npx skills find <term>`. Largest catalog — query for every job. Results carry name, owner/repo, description, **install count**, **GitHub stars** — capture these for ranking. First call may be slow.
-- **MCP-server** (`type: "mcp-server"`): scanner couldn't probe — only the live session has MCP. For each: (1) enumerate providers/tools; (2) keep only catalog providers (a `search`+`get` pair whose `search` description mentions skill/plugin/agent/marketplace/directory/catalog — e.g. context-a8c's `ai-skills` = Automattic Agent Skills Directory, **blessed**, outranks public on ties); (3) query with the same noun-phrases, then `get` for final picks. Same result shape as cli-provider. If unreachable or no catalog provider, skip silently.
+- **MCP-server** (`type: "mcp-server"`): scanner couldn't probe — only the live session has MCP. For each: (1) load the provider and enumerate its tools; (2) keep only catalog providers — a `search`+`get` pair whose `search` description mentions skill/plugin/agent/marketplace/directory/catalog; (3) `search` once per job phrase, keep only hits whose name/description fit the job (substring matches can be broad and alphabetical, not relevance-ranked), then `get` for final picks. Same result shape as cli-provider (`name`, `slug`, `type`, `description`, `repo_key`, `source_url`). If unreachable or no catalog provider, skip silently.
+  - **Calls** (e.g. a discovered `context-a8c` server exposing an `ai-skills` catalog): `mcp__context-a8c__context-a8c-load-provider` `{provider:"ai-skills"}`, then `mcp__context-a8c__context-a8c-execute-tool` `{provider:"ai-skills", subtool:"search", subtool_args:{query:"<job phrase>", limit:8}}`, and `subtool:"get"` `{slug, repo_key}` for picks. Other servers expose their own provider/tool names — read them from the load-provider result.
 
 ### Combine results across catalogs
 

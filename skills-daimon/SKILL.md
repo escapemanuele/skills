@@ -3,7 +3,7 @@ name: skills-daimon
 description: Analyze recent Claude Code sessions and produce a local, evidence-backed report with workflow coaching, catalog-backed skill/plugin recommendations, and one next action. Invoke directly with /skills-daimon.
 disable-model-invocation: true
 argument-hint: "[--days 28] [--compact|--normal|--full]"
-allowed-tools: Bash(python3 *) Bash(npx skills find *) Bash(wp context *) Read
+allowed-tools: Bash(python3 *) Bash(npx skills find *) Bash(wp context *) Read mcp__context-a8c__context-a8c-load-provider mcp__context-a8c__context-a8c-execute-tool
 ---
 
 # Skills Daimon
@@ -41,9 +41,15 @@ set). Map the user's `--compact|--normal|--full` flag to scan's `--budget`
    `|` separates jobs; **commas separate search phrases within a job — keep
    phrases whole** (registries rank "git safety" far better than "git" +
    "safety"). Jobs run in parallel; live `npx skills find` is queried inside
-   it (strict registry-verbatim parsing — nothing invented). Probe any `needs_live_probe`
-   mcp-server catalogs yourself. Pick one catalog-backed winner per job;
-   unmatched jobs → "Worth building yourself".
+   it (strict registry-verbatim parsing — nothing invented).
+   **Then probe every `needs_live_probe` mcp-server catalog yourself** — a
+   subprocess can't reach MCP, so the script only flags the catalogs it
+   discovered. For each: load the MCP provider, find its `search`+`get` pair,
+   `search` once per job phrase, keep only the hits whose name/description fit
+   the job (substring matches can be broad), and `get` for the final picks.
+   Treat real hits as catalog-backed candidates with their `source_url`. Pick
+   one catalog-backed winner per job; unmatched jobs → "Worth building yourself".
+   See `references/pipeline.md` (Step 3, MCP-server bullet) for the exact calls.
 3. **Finalize** — write `fill.json` (`{"recommendations": [...], "gaps": [...]}`,
    schema in `references/pipeline.md`), then
    `python3 ${CLAUDE_SKILL_DIR}/bin/finalize.py --fill fill.json`
