@@ -101,6 +101,96 @@ class TestScanCodex(unittest.TestCase):
         self.assertEqual(self.out["completion"]["sessions_with_push"], 1)
 
 
+class TestRicherSignals(unittest.TestCase):
+    """The medium-batch additions: work mix, lines, stuck loops."""
+    def _scan(self, lines):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        d = Path(tmp.name) / "sessions" / "2026" / "06" / "10"
+        d.mkdir(parents=True)
+        (d / "rollout-z.jsonl").write_text(_rollout(lines))
+        return scan_codex.scan_codex(Path(tmp.name), max_age_days=3650)
+
+    def test_lines_added_removed_from_patch(self):
+        patch = "*** Begin Patch\n+new line one\n+new line two\n-old line\n context\n*** End Patch"
+        out = self._scan([
+            {"type": "session_meta", "payload": {"cwd": "/p"}},
+            _ri("custom_tool_call", name="apply_patch", input=patch),
+        ])
+        self.assertEqual(out["completion"]["lines_added"], 2)
+        self.assertEqual(out["completion"]["lines_removed"], 1)
+
+    def test_writing_mix_from_md_edits(self):
+        out = self._scan([
+            {"type": "session_meta", "payload": {"cwd": "/p"}},
+            _ri("custom_tool_call", name="apply_patch", input="+x"),
+            _em("patch_apply_end", changes={"/p/notes.md": {}, "/p/README.md": {}}),
+        ])
+        self.assertGreater(out["work_recap"]["mix"]["writing"], 0)
+        self.assertEqual(out["work_recap"]["top_projects"][0]["kind"], "writing")
+
+    def test_data_mix_from_mcp(self):
+        out = self._scan([
+            {"type": "session_meta", "payload": {"cwd": "/p"}},
+            _em("mcp_tool_call_end", tool="trino_execute_sql"),
+            _em("mcp_tool_call_end", tool="trino_query"),
+        ])
+        self.assertGreater(out["work_recap"]["mix"]["data"], 0)
+
+    def test_stuck_loop_detected(self):
+        def fc(ts):
+            return {"timestamp": ts, "type": "response_item",
+                    "payload": {"type": "function_call", "name": "exec_command",
+                                "arguments": json.dumps({"cmd": "npm test"})}}
+        out = self._scan([
+            {"type": "session_meta", "payload": {"cwd": "/p"}},
+            fc("2026-06-10T00:00:00Z"), fc("2026-06-10T00:00:30Z"),
+            fc("2026-06-10T00:01:00Z"),
+        ])
+        self.assertEqual(len(out["stuck_loops"]), 1)
+        self.assertEqual(out["stuck_loops"][0]["count"], 3)
+
+    def test_honest_polling_not_flagged(self):
+        # identical cmds but >2 min apart -> not a stuck loop.
+        def fc(ts):
+            return {"timestamp": ts, "type": "response_item",
+                    "payload": {"type": "function_call", "name": "exec_command",
+                                "arguments": json.dumps({"cmd": "gh run watch"})}}
+        out = self._scan([
+            {"type": "session_meta", "payload": {"cwd": "/p"}},
+            fc("2026-06-10T00:00:00Z"), fc("2026-06-10T00:05:00Z"),
+            fc("2026-06-10T00:10:00Z"),
+        ])
+        self.assertEqual(out["stuck_loops"], [])
+
+
+class TestSourceAwareInstall(unittest.TestCase):
+    def test_codex_flags_marketplace_nonportable(self):
+        import catalog_search as cs
+        mp = [{"name": "exa", "catalog_type": "marketplace",
+               "source_url": "https://exa.ai",
+               "install": ["/plugin install exa@x"], "matched_terms": ["w"]}]
+        out = cs._apply_source([dict(c) for c in mp], "codex")
+        self.assertFalse(out[0]["portable"])
+        self.assertIn("install in Codex", out[0]["install"][0])
+
+    def test_codex_keeps_skills_sh_portable(self):
+        import catalog_search as cs
+        reg = [{"name": "x", "catalog_type": "cli-registry",
+                "install": ["npx skills add a/b@x"], "matched_terms": ["w"]}]
+        out = cs._apply_source([dict(c) for c in reg], "codex")
+        self.assertTrue(out[0]["portable"])
+        self.assertEqual(out[0]["install"], ["npx skills add a/b@x"])
+
+    def test_claude_unchanged(self):
+        import catalog_search as cs
+        mp = [{"name": "exa", "catalog_type": "marketplace",
+               "install": ["/plugin install exa@x"], "matched_terms": ["w"]}]
+        out = cs._apply_source([dict(c) for c in mp], "claude")
+        self.assertTrue(out[0]["portable"])
+        self.assertEqual(out[0]["install"], ["/plugin install exa@x"])
+
+
 class TestNoiseFilter(unittest.TestCase):
     def test_codex_preamble_detected(self):
         self.assertTrue(scan_codex._is_codex_noise("The following is the Codex agent history\n..."))

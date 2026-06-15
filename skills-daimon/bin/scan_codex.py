@@ -87,16 +87,34 @@ def _exec_cmd(payload: dict) -> str | None:
     return None
 
 
+def _patch_line_counts(patch_text: str) -> tuple[int, int]:
+    """Count added/removed lines in an apply_patch body (skip +++/--- headers)."""
+    added = removed = 0
+    for ln in (patch_text or "").splitlines():
+        if ln.startswith("+") and not ln.startswith("+++"):
+            added += 1
+        elif ln.startswith("-") and not ln.startswith("---"):
+            removed += 1
+    return added, removed
+
+
+def _ext(path: str) -> str:
+    return path.rsplit(".", 1)[-1].lower() if "." in path.rsplit("/", 1)[-1] else ""
+
+
 def _scan_one(path: Path) -> dict:
     """Parse a single rollout into per-session aggregates."""
     cwd = None
-    cmds: list[str] = []
+    cmd_events: list[tuple[str, str]] = []   # (timestamp, cmd) for stuck loops
     prompts: list[str] = []
     tokens = 0
     exec_ok = exec_err = 0
     tool_use = collections.Counter()
     mcp_calls = collections.Counter()
     files_modified: set[str] = set()
+    edited_exts: list[str] = []
+    mcp_names: list[str] = []
+    lines_added = lines_removed = 0
     committed = pushed = False
     out_by_call: dict[str, str] = {}
 
@@ -109,6 +127,7 @@ def _scan_one(path: Path) -> dict:
         except ValueError:
             continue
         rtype = rec.get("type")
+        ts = rec.get("timestamp") or ""
         p = rec.get("payload") or {}
         if rtype in ("session_meta", "turn_context") and not cwd:
             cwd = p.get("cwd")
@@ -117,13 +136,16 @@ def _scan_one(path: Path) -> dict:
             if pt == "function_call":
                 cmd = _exec_cmd(p)
                 if cmd is not None:
-                    cmds.append(cmd)
+                    cmd_events.append((ts, cmd))
                     tool_use["Bash"] += 1
                 else:
                     tool_use[p.get("name") or "function_call"] += 1
             elif pt == "custom_tool_call":
                 name = p.get("name") or ""
                 tool_use["Edit" if name == "apply_patch" else (name or "custom_tool_call")] += 1
+                if name == "apply_patch":
+                    a, r = _patch_line_counts(p.get("input") or "")
+                    lines_added += a; lines_removed += r
             elif pt == "function_call_output":
                 cid = p.get("call_id")
                 if cid:
@@ -146,12 +168,14 @@ def _scan_one(path: Path) -> dict:
                 if isinstance(tot, int):
                     tokens = max(tokens, tot)   # cumulative — keep the largest
             elif pt == "mcp_tool_call_end":
-                name = p.get("tool") or p.get("name") or "mcp"
-                mcp_calls[str(name)] += 1
-                tool_use[str(name)] += 1
+                name = str(p.get("tool") or p.get("name") or "mcp")
+                mcp_calls[name] += 1
+                tool_use[name] += 1
+                mcp_names.append(name)
             elif pt == "patch_apply_end":
                 for f in (p.get("changes") or {}):
                     files_modified.add(f)
+                    edited_exts.append(_ext(f))
 
     # exec_command exit codes from the matching outputs.
     for out in out_by_call.values():
@@ -161,6 +185,7 @@ def _scan_one(path: Path) -> dict:
                 exec_ok += 1
             else:
                 exec_err += 1
+    cmds = [c for _, c in cmd_events]
     for c in cmds:
         if re.search(r"\bgit\s+commit\b", c):
             committed = True
@@ -168,22 +193,77 @@ def _scan_one(path: Path) -> dict:
             pushed = True
 
     return {
-        "cwd": cwd, "cmds": cmds, "prompts": prompts, "tokens": tokens,
-        "exec_ok": exec_ok, "exec_err": exec_err, "tool_use": tool_use,
-        "mcp_calls": mcp_calls, "files_modified": files_modified,
-        "committed": committed, "pushed": pushed,
+        "cwd": cwd, "cmd_events": cmd_events, "cmds": cmds, "prompts": prompts,
+        "tokens": tokens, "exec_ok": exec_ok, "exec_err": exec_err,
+        "tool_use": tool_use, "mcp_calls": mcp_calls,
+        "files_modified": files_modified, "edited_exts": edited_exts,
+        "mcp_names": mcp_names, "lines_added": lines_added,
+        "lines_removed": lines_removed, "committed": committed, "pushed": pushed,
+        "file": path.name,
     }
 
 
-def _classify_kind(cmds, prompts) -> str:
-    """Coarse project kind from command verbs (mirror of scan's dev bucket).
-    extract_bash_verb returns subcommand-aware verbs ("git diff"); match on the
-    base token so git/python3/npm/etc. count as dev."""
-    bases = [v.split()[0] for v in (_scan.extract_bash_verb(c) for c in cmds) if v]
-    dev = sum(1 for b in bases if b in _scan.DEV_VERBS)
-    if bases and dev >= max(2, len(bases) // 4):
-        return "dev"
-    return "other"
+def _discover_codex_installed() -> list[str]:
+    """Names of skills installed under ~/.codex/skills (skip the .system dir),
+    so recommendations don't suggest something already present."""
+    names: list[str] = []
+    base = CODEX_HOME / "skills"
+    if not base.is_dir():
+        return names
+    for md in base.glob("**/SKILL.md"):
+        if "/.system/" in str(md):
+            continue
+        n = _scan.read_skill_name(md)
+        if n:
+            names.append(n)
+    return sorted(set(names))
+
+
+def _session_buckets(s: dict) -> collections.Counter:
+    """Per-session work-mix buckets, mirroring scan.py: dev verbs, prose vs dev
+    edits, and data/ops MCP hints."""
+    b = collections.Counter()
+    for base in (v.split()[0] for v in (_scan.extract_bash_verb(c) for c in s["cmds"]) if v):
+        if base in _scan.DEV_VERBS:
+            b["dev"] += 1
+    for ext in s["edited_exts"]:
+        b["writing" if ext in _scan.PROSE_EXT else "dev"] += 1
+    for name in s["mcp_names"]:
+        low = name.lower()
+        if any(h in low for h in _scan.DATA_MCP_HINTS):
+            b["data"] += 1
+        elif any(h in low for h in _scan.OPS_MCP_HINTS):
+            b["ops"] += 1
+    return b
+
+
+def _stuck_loops_for(s: dict) -> list[dict]:
+    """≥3 identical exec_command runs ≤2 min apart — same rule as scan.py."""
+    ev = s["cmd_events"]
+    out: list[dict] = []
+    if len(ev) < 3:
+        return out
+    i = 0
+    while i < len(ev):
+        cmd = ev[i][1]
+        j = i + 1
+        while j < len(ev) and ev[j][1] == cmd:
+            tp, tc = _scan._parse_ts(ev[j - 1][0]), _scan._parse_ts(ev[j][0])
+            gap = (tc - tp).total_seconds() if (tp and tc) else 0
+            if gap > _scan.STUCK_GAP_SECONDS:
+                break
+            j += 1
+        if j - i >= 3:
+            out.append({
+                "command_hash": _scan._sha8(cmd),
+                "command_summary": _scan._cmd_summary(cmd),
+                "command": cmd[:200],
+                "count": j - i,
+                "session": s["file"],
+                "first_ts": ev[i][0], "last_ts": ev[j - 1][0],
+            })
+        i = j if j > i else i + 1
+    return out
 
 
 def scan_codex(root: Path, max_age_days: int, cwd: Path | None = None,
@@ -206,6 +286,10 @@ def scan_codex(root: Path, max_age_days: int, cwd: Path | None = None,
     exec_ok = exec_err = 0
     files_modified: set[str] = set()
     commits = pushes = 0
+    lines_added = lines_removed = 0
+    work_mix_counts = collections.Counter()
+    proj_signal: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    stuck_loops: list[dict] = []
 
     for s in sessions:
         tool_use.update(s["tool_use"])
@@ -213,10 +297,14 @@ def scan_codex(root: Path, max_age_days: int, cwd: Path | None = None,
         exec_ok += s["exec_ok"]; exec_err += s["exec_err"]
         files_modified |= s["files_modified"]
         commits += int(s["committed"]); pushes += int(s["pushed"])
+        lines_added += s["lines_added"]; lines_removed += s["lines_removed"]
         path = s["cwd"] or "(unknown)"
         projects[path] += 1
         proj_tokens[path] += s["tokens"]
-        proj_cmds[path].extend(s["cmds"])
+        buckets = _session_buckets(s)
+        work_mix_counts.update(buckets)
+        proj_signal[path].update(buckets)
+        stuck_loops.extend(_stuck_loops_for(s))
         for pr in s["prompts"]:
             prompts[_scan.normalize_prompt(pr)[:160]] += 1
         for c in s["cmds"]:
@@ -236,15 +324,19 @@ def scan_codex(root: Path, max_age_days: int, cwd: Path | None = None,
 
     top_projects = []
     for path, n in projects.most_common(6):
+        sig = proj_signal[path]
+        kind = sig.most_common(1)[0][0] if sig else "other"
         top_projects.append({
             "path": path, "sessions": n, "tokens": proj_tokens[path],
-            "kind": _classify_kind(proj_cmds[path], []),
-            "branch": None, "commits": 0, "pushes": 0,
+            "kind": kind, "branch": None, "commits": 0, "pushes": 0,
         })
-    dev = sum(1 for p in top_projects if p["kind"] == "dev")
-    mix_dev = round(100 * dev / len(top_projects)) if top_projects else 0
-    work_mix = {"dev": mix_dev, "writing": 0, "data": 0,
-                "ops": 0, "other": 100 - mix_dev}
+    mix_total = sum(work_mix_counts.values())
+    if mix_total:
+        work_mix = {k: round(100 * work_mix_counts.get(k, 0) / mix_total)
+                    for k in ("dev", "writing", "data", "ops")}
+        work_mix["other"] = max(0, 100 - sum(work_mix.values()))
+    else:
+        work_mix = {"dev": 0, "writing": 0, "data": 0, "ops": 0, "other": 100}
 
     catalogs = _scan.discover_catalogs()
 
@@ -286,16 +378,17 @@ def scan_codex(root: Path, max_age_days: int, cwd: Path | None = None,
                      "coverage": {"labeled": 0, "total": session_count}},
         "completion": {
             "sessions_with_commit": commits, "sessions_with_push": pushes,
-            "lines_added": 0, "lines_removed": 0,
+            "lines_added": lines_added, "lines_removed": lines_removed,
             "files_modified": len(files_modified),
-            "prs_detected_via_gh": {}, "coverage": {"with_meta": 0, "total": session_count},
+            "prs_detected_via_gh": {}, "coverage": {"with_meta": session_count,
+                                                    "total": session_count},
         },
         "tool_errors": {"Bash": {"ok": exec_ok, "error": exec_err}},
         "memory_events": {"remember_invocations": 0, "memory_file_edits": 0,
                           "sessions_with_memory": 0},
-        "stuck_loops": [],
+        "stuck_loops": stuck_loops,
         "available_catalogs": catalogs,
-        "installed_skills": [], "installed_plugins": [],
+        "installed_skills": _discover_codex_installed(), "installed_plugins": [],
         "ignored_names": _scan.load_ignored(),
     }
 

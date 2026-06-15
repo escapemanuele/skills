@@ -290,7 +290,33 @@ def dedupe_and_filter(hits: list[dict], installed: set[str], ignored: set[str]) 
 # --------------------------------------------------------------------------
 # Orchestration
 # --------------------------------------------------------------------------
-def search(scan: dict, terms: list[str]) -> dict:
+# Which catalog types yield an install that works outside Claude Code.
+# skills.sh (`npx skills add`) is cross-tool; `/plugin install` and `wp context`
+# are Claude-specific, so on Codex we surface the source instead of a command
+# that won't run there.
+_PORTABLE_TYPES = {"cli-registry"}
+
+
+def _apply_source(candidates: list[dict], source: str) -> list[dict]:
+    """Annotate candidates for the target agent. On `codex`, mark Claude-only
+    installs non-portable and replace the command with a source pointer."""
+    if source != "codex":
+        for c in candidates:
+            c.setdefault("portable", True)
+        return candidates
+    for c in candidates:
+        if c.get("catalog_type") in _PORTABLE_TYPES:
+            c["portable"] = True
+        else:
+            c["portable"] = False
+            url = c.get("source_url") or ""
+            c["install"] = ([f"# Claude Code plugin — open {url} to install in Codex"]
+                            if url else ["# Claude Code plugin — not Codex-native"])
+            c["install_note"] = "Not Codex-native — install manually from the source."
+    return candidates
+
+
+def search(scan: dict, terms: list[str], source: str = "claude") -> dict:
     catalogs = scan.get("available_catalogs") or []
     installed = set(scan.get("installed_skills") or []) | set(scan.get("installed_plugins") or [])
     ignored = set(scan.get("ignored_names") or [])
@@ -309,7 +335,7 @@ def search(scan: dict, terms: list[str]) -> dict:
         elif ctype == "mcp-server":
             needs_live_probe.append({"name": c.get("name"), "type": "mcp-server", "probe": c.get("probe")})
 
-    candidates = dedupe_and_filter(raw, installed, ignored)
+    candidates = _apply_source(dedupe_and_filter(raw, installed, ignored), source)
     return {"candidates": candidates, "needs_live_probe": needs_live_probe, "errors": errors}
 
 
@@ -335,12 +361,12 @@ def _job_terms(job: str) -> list[str]:
     return [t.strip() for t in job.split(",") if t.strip()]
 
 
-def search_batch(scan: dict, jobs: list[str], top: int) -> dict:
+def search_batch(scan: dict, jobs: list[str], top: int, source: str = "claude") -> dict:
     """Run one search() per job concurrently; trim each job to `top` candidates.
     Jobs are independent fan-outs, so the npx/wp latency overlaps instead of
     stacking."""
     with ThreadPoolExecutor(max_workers=min(6, max(1, len(jobs)))) as ex:
-        results = list(ex.map(lambda j: search(scan, _job_terms(j)), jobs))
+        results = list(ex.map(lambda j: search(scan, _job_terms(j), source), jobs))
     out_jobs = []
     errors: list[str] = []
     probes = {p.get("name"): p for r in results for p in r.get("needs_live_probe", [])}
@@ -365,15 +391,19 @@ def main() -> int:
                     help='pipe-separated jobs; commas separate phrases within a job, '
                          'e.g. "git safety, commit push|sql query, data analysis"')
     ap.add_argument("--top", type=int, default=6, help="max candidates per job (batch mode)")
+    ap.add_argument("--source", default="claude", choices=["claude", "codex"],
+                    help="Target agent — on codex, Claude-only installs are flagged non-portable.")
     args = ap.parse_args()
     if not args.terms and not args.jobs:
         ap.error("one of --terms or --jobs is required")
     scan = json.loads(Path(args.scan).read_text())
+    # Honor the scan's own source tag if present (run.py records it).
+    source = scan.get("source") or args.source
     if args.jobs:
         jobs = [j.strip() for j in args.jobs.split("|") if j.strip()]
-        out = search_batch(scan, jobs, args.top)
+        out = search_batch(scan, jobs, args.top, source)
     else:
-        out = search(scan, args.terms)
+        out = search(scan, args.terms, source)
     json.dump(out, sys.stdout)
     sys.stdout.write("\n")
     return 0

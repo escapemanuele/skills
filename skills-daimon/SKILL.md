@@ -47,6 +47,10 @@ set). Map the user's `--compact|--normal|--full` flag to scan's `--budget`
 2. **Recommend** — cluster 3–5 jobs from `job_signals` + the skeleton, then **one
    batch call**:
    `python3 ${CLAUDE_SKILL_DIR}/bin/catalog_search.py --scan <paths.scan> --jobs "git safety, commit push|web research, content extraction|..." --top 6`
+   (the scan's own `source` tag is honored automatically; on **codex**, Claude-only
+   installs like `/plugin install …` are flagged `portable:false` with a
+   source-pointer install line — surface those as "open the source" rather than a
+   command that won't run in Codex. `npx skills add` works in both.)
    `|` separates jobs; **commas separate search phrases within a job — keep
    phrases whole** (registries rank "git safety" far better than "git" +
    "safety"). Jobs run in parallel; live `npx skills find` is queried inside
