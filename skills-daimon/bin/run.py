@@ -86,17 +86,36 @@ def build_trends(snapshot: dict, history: list[dict]) -> dict:
             "rows": rows}
 
 
+def _resolve_source(choice: str) -> tuple[str, str]:
+    """Return (scanner_script, source_label). 'auto' prefers Claude when it has
+    session data, else Codex; an explicit choice is honored as-is."""
+    claude_has = any((Path.home() / ".claude" / "projects").glob("*/*.jsonl")) \
+        if (Path.home() / ".claude" / "projects").is_dir() else False
+    codex_has = (Path.home() / ".codex" / "sessions").is_dir()
+    if choice == "claude":
+        return "scan.py", "claude"
+    if choice == "codex":
+        return "scan_codex.py", "codex"
+    # auto
+    if claude_has or not codex_has:
+        return "scan.py", "claude"
+    return "scan_codex.py", "codex"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="skills-daimon orchestrator (scan+analyze+stage)")
     ap.add_argument("--days", type=int, default=28)
     ap.add_argument("--budget", default="compact", choices=["compact", "normal", "full"])
+    ap.add_argument("--source", default="auto", choices=["auto", "claude", "codex"],
+                    help="Which agent's sessions to scan (default: auto-detect).")
     args = ap.parse_args()
 
     workdir = Path(tempfile.gettempdir()) / "skills-daimon-work"
     workdir.mkdir(parents=True, exist_ok=True)
     py = sys.executable or "python3"
 
-    scan = _run_json([py, str(BIN / "scan.py"), "--days", str(args.days),
+    scanner, source = _resolve_source(args.source)
+    scan = _run_json([py, str(BIN / scanner), "--days", str(args.days),
                       "--budget", args.budget])
     scan_path = workdir / "scan.json"
     scan_path.write_text(json.dumps(scan))
@@ -126,6 +145,7 @@ def main() -> int:
         history = []
 
     out = {
+        "source": source,
         "gates": {
             "session_count": scan.get("session_count"),
             "catalogs": [c.get("name") for c in scan.get("available_catalogs") or []],

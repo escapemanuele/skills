@@ -1,16 +1,18 @@
 ---
 name: skills-daimon
-description: Analyze recent Claude Code sessions and produce a local, evidence-backed report with workflow coaching, catalog-backed skill/plugin recommendations, and one next action. Invoke directly with /skills-daimon.
+description: Analyze recent Claude Code (or OpenAI Codex) sessions and produce a local, evidence-backed report with workflow coaching, catalog-backed skill/plugin recommendations, and one next action. Invoke directly with /skills-daimon.
 disable-model-invocation: true
-argument-hint: "[--days 28] [--compact|--normal|--full]"
+argument-hint: "[--days 28] [--compact|--normal|--full] [--source auto|claude|codex]"
 allowed-tools: Bash(python3 *) Bash(npx skills find *) Bash(wp context *) Read mcp__context-a8c__context-a8c-load-provider mcp__context-a8c__context-a8c-execute-tool
 ---
 
 # Skills Daimon
 
-Run a local, privacy-first report over recent Claude Code sessions. Spot recurring
-jobs, recommend matching skills/plugins from real catalogs only, coach better
-habits — all grounded in hard counts. Local-only; nothing leaves the machine.
+Run a local, privacy-first report over recent Claude Code (or OpenAI Codex)
+sessions. Spot recurring jobs, recommend matching skills/plugins from real
+catalogs only, coach better habits — all grounded in hard counts. Local-only;
+nothing leaves the machine. Pass `--source` through to `run.py` (default
+auto-detect); see the Pipeline step 1 for what differs on Codex.
 
 Bundled files live under `${CLAUDE_SKILL_DIR}` (prefer `$CLAUDE_PLUGIN_ROOT` if
 set). Map the user's `--compact|--normal|--full` flag to scan's `--budget`
@@ -30,9 +32,16 @@ set). Map the user's `--compact|--normal|--full` flag to scan's `--budget`
 
 1. **Run** — `python3 ${CLAUDE_SKILL_DIR}/bin/run.py --days 28 --budget compact`
    One call: scans, analyzes, stages `payload.json`/`snapshot.json` in a workdir,
-   and prints a slim summary — gates, file paths, the markdown skeleton (verdict,
-   archetype, scorecard, coaching all precomputed; rates carry denominators),
-   `job_signals` for clustering, and ready-made `trends` rows.
+   and prints a slim summary — `source`, gates, file paths, the markdown skeleton
+   (verdict, archetype, scorecard, coaching all precomputed; rates carry
+   denominators), `job_signals` for clustering, and ready-made `trends` rows.
+   - **Source:** `--source auto` (default) scans Claude Code sessions
+     (`~/.claude/projects`) when present, else OpenAI Codex (`~/.codex/sessions`,
+     via `scan_codex.py`). Force one with `--source claude|codex`. Codex has no
+     Anthropic outcome facets and no built-in Grep/Glob/Read, so the outcome
+     scorecard rows and the shell-vs-built-in signal degrade to no-data — that's
+     expected, not a bug. The printed `source` says which was scanned; mention it
+     once in the report intro when it's `codex`.
    - **GATE A:** if `gates.session_count == 0` → STOP, tell the user there's no recent data. End.
    - **GATE B:** if `gates.catalogs` is empty → emit zero catalog-backed recs (coaching may still run).
 2. **Recommend** — cluster 3–5 jobs from `job_signals` + the skeleton, then **one
