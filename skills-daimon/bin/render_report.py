@@ -951,6 +951,9 @@ SIMPLE_CSS = """
 .simple-rec .srline{color:#374151;font-size:14px;margin:4px 0 8px}
 .simple-rec .srinstall{display:block;background:#F3F4F6;padding:8px 10px;border-radius:6px;font-size:12.5px;color:#334155;overflow-x:auto}
 .simple-coach h4{margin:0 0 6px}
+.simple-coach .scwhat{color:#374151;margin:0 0 4px}
+.simple-coach .scwhy{color:#374151;margin:0 0 4px}
+.simple-coach .scwhat b,.simple-coach .scwhy b,.simple-coach .scbetter b{color:#171717}
 .simple-coach .scbetter{color:#171717;margin:0 0 4px}
 .simple-coach .scsaw{color:#6B7280;font-size:13px;margin:0}
 .simple-note{color:#6B7280;font-size:13px;margin:0 0 10px}
@@ -1461,14 +1464,22 @@ def simple_recs_block(recs: list) -> str:
 
 
 def simple_coach_block(coaching: list) -> str:
-    """Coaching, trimmed to the action plus the evidence one-liner."""
+    """Coaching: the problem (what you do), why it's worth changing, the action,
+    and the evidence one-liner. Each line is optional so a sparse card degrades
+    gracefully."""
     if not coaching:
         return ""
     cards = []
     for c in coaching:
+        saw = esc(c.get("saw", ""))
+        why = esc(c.get("costs", ""))
+        what_html = f'<p class="scwhat"><b>What you do.</b> {saw}</p>' if saw else ""
+        why_html = f'<p class="scwhy"><b>Why change.</b> {why}</p>' if why else ""
         cards.append(
             '<div class="card simple-coach">'
             f'<h4>{esc(c.get("title", ""))}</h4>'
+            f'{what_html}'
+            f'{why_html}'
             f'<p class="scbetter"><b>Try this.</b> {esc(c.get("better", ""))}</p>'
             f'<p class="scsaw">{esc(c.get("evidence", ""))}</p>'
             '</div>'
