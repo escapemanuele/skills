@@ -1044,15 +1044,15 @@ function sdDownloadCard(){
 function sdShareCard(){
   var svg=sdPickSvg(); if(!svg)return;
   var cap=(window.__sdShare&&window.__sdShare.caption)||'My Claude Code archetype';
-  var tag=(window.__sdShare&&window.__sdShare.hashtag)||'SkillsDaimon';
   sdSvgToPng(svg).then(function(png){
+    // Always land the file on disk — that's the reliable cross-browser path.
+    sdDownloadPng(png);
+    // On devices with native file share (mostly mobile), also open the share
+    // sheet with the caption ready. Best-effort; never blocks the download.
     var file=new File([png],'skills-daimon-archetype.png',{type:'image/png'});
     if(navigator.canShare&&navigator.canShare({files:[file]})){
-      return navigator.share({files:[file],text:cap,title:'Skills Daimon'});
+      navigator.share({files:[file],text:cap,title:'Skills Daimon'}).catch(function(){});
     }
-    sdDownloadPng(png);
-    var intent='https://twitter.com/intent/tweet?text='+encodeURIComponent(cap)+'&hashtags='+encodeURIComponent(tag);
-    window.open(intent,'_blank','noopener');
   }).catch(function(){ sdDownloadCard(); });
 }
 </script>
@@ -1553,9 +1553,9 @@ def simple_view(payload: dict, m: dict, grove_html: str,
             '<button class="viewtoggle" onclick="sdDownloadCard()">Download PNG</button>'
             '</div>'
             f'<div id="sd-preview">{preview_svg}</div>'
-            '<p class="share-hint">Exports as PNG — one tap opens your share sheet '
-            'with a caption ready. Aggregate only; no project names or counts. '
-            'Nothing is uploaded.</p>'
+            '<p class="share-hint">Downloads as a PNG — on mobile it also opens '
+            'your share sheet with a caption ready. Aggregate only; no project '
+            'names or counts. Nothing is uploaded.</p>'
             '</details>'
         )
 
