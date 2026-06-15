@@ -982,25 +982,70 @@ function sdToggleView(){
 # SVG. Fully client-side — builds a Blob from the embedded SVG and downloads it.
 # Nothing is uploaded; the user posts the file themselves.
 SHARE_CSS = """
-.viewtoggle.share{background:#0F766E}
-.viewtoggle.share:hover{background:#0b5e57}
+.viewtoggle.share{background:#6D28D9}
+.viewtoggle.share:hover{background:#5b21b6}
 .share-preview{margin:0 0 14px}
 .share-preview summary{cursor:pointer;color:#6D28D9;font-size:13px;font-weight:600}
-.share-preview svg{max-width:340px;width:100%;height:auto;margin-top:10px;border:1px solid #E5E7EB;border-radius:12px}
-.share-hint{color:#9CA3AF;font-size:12px;margin:2px 0 0}
+.share-preview svg{max-width:340px;width:100%;height:auto;margin-top:10px;border:1px solid #E5E7EB;border-radius:12px;box-shadow:0 6px 24px rgba(76,29,149,.18)}
+.share-sizes{margin:8px 0 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.share-sizes label{color:#6B7280;font-size:12px}
+.share-sizes select{font-size:12px;padding:2px 6px;border:1px solid #E5E7EB;border-radius:6px}
+.share-hint{color:#9CA3AF;font-size:12px;margin:6px 0 0}
 .simple-actions{display:flex;gap:8px;flex-wrap:wrap}
 """
 
+# Client-side share: rasterize the selected SVG card to PNG (platforms reject
+# SVG), then offer the native share sheet with a pre-filled caption, falling
+# back to a PNG download + X intent on desktop. Nothing is uploaded.
 SHARE_JS = """
 <script>
+function sdPickSvg(){
+  var sel=document.getElementById('sd-size'); var size=sel?sel.value:'square';
+  var t=document.getElementById('sd-card-'+size)||document.getElementById('sd-card-square');
+  return t?t.innerHTML.trim():'';
+}
+function sdSvgToPng(svg){
+  return new Promise(function(resolve,reject){
+    var m=svg.match(/viewBox=\\"0 0 (\\d+) (\\d+)\\"/);
+    var w=m?+m[1]:1080, h=m?+m[2]:1080;
+    var blob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
+    var url=URL.createObjectURL(blob), img=new Image();
+    img.onload=function(){
+      var c=document.createElement('canvas'); c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(url);
+      c.toBlob(function(png){ png?resolve(png):reject(new Error('toBlob failed')); },'image/png');
+    };
+    img.onerror=function(e){ URL.revokeObjectURL(url); reject(e); };
+    img.src=url;
+  });
+}
+function sdDownloadPng(png){
+  var url=URL.createObjectURL(png), a=document.createElement('a');
+  a.href=url; a.download='skills-daimon-archetype.png';
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
 function sdDownloadCard(){
-  var t=document.getElementById('sd-share-card'); if(!t)return;
-  var svg=t.innerHTML.trim(); if(!svg)return;
-  var blob=new Blob([svg],{type:'image/svg+xml'});
-  var url=URL.createObjectURL(blob),a=document.createElement('a');
-  a.href=url; a.download='skills-daimon-archetype.svg';
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
+  var svg=sdPickSvg(); if(!svg)return;
+  sdSvgToPng(svg).then(sdDownloadPng).catch(function(){
+    var b=new Blob([svg],{type:'image/svg+xml'}),u=URL.createObjectURL(b),a=document.createElement('a');
+    a.href=u; a.download='skills-daimon-archetype.svg'; document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(u);
+  });
+}
+function sdShareCard(){
+  var svg=sdPickSvg(); if(!svg)return;
+  var cap=(window.__sdShare&&window.__sdShare.caption)||'My Claude Code archetype';
+  var tag=(window.__sdShare&&window.__sdShare.hashtag)||'SkillsDaimon';
+  sdSvgToPng(svg).then(function(png){
+    var file=new File([png],'skills-daimon-archetype.png',{type:'image/png'});
+    if(navigator.canShare&&navigator.canShare({files:[file]})){
+      return navigator.share({files:[file],text:cap,title:'Skills Daimon'});
+    }
+    sdDownloadPng(png);
+    var intent='https://twitter.com/intent/tweet?text='+encodeURIComponent(cap)+'&hashtags='+encodeURIComponent(tag);
+    window.open(intent,'_blank','noopener');
+  }).catch(function(){ sdDownloadCard(); });
 }
 </script>
 """
@@ -1182,84 +1227,169 @@ def _gamify_blocks(payload: dict, m: dict):
     return level_chip, quest_html, grove_html, gs
 
 
-def build_share_card_svg(archetype: dict, work_mix: dict, grove: dict,
-                         level: int, xp: int) -> str:
-    """A self-contained 1080×1080 SVG 'wrapped' poster — non-identifying only.
+# Share-card palette — one bold, branded look that survives a screenshot feed.
+SD_CARD_FONT = "-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif"
+SD_BG_STOPS = (("#4C1D95", 0), ("#6D28D9", 55), ("#7C3AED", 100))   # indigo→violet
+SD_HERO_STOPS = (("#F0ABFC", 0), ("#FDE68A", 100))                  # pink→amber
+SD_INK = "#F5F3FF"        # high-contrast light ink on the dark card
+SD_INK_SOFT = "#C4B5FD"   # muted lavender for labels
 
-    Contains the archetype title + tagline, the aggregate work-mix bar + legend,
-    the Daimon Grove visual, and the playful Daimon Level/XP. These aggregate
-    percentages and gamified figures carry no identifying signal. It deliberately
-    excludes every identifying datum: project names/paths, per-project session or
-    commit counts, recommendations, and coaching text. Pure inline SVG, no
-    external assets — downloadable as an image the user can post."""
+
+def share_pill_text(level: int, badge_count: int, balanced: bool) -> str:
+    """Honest achievement tier from real game state — never a fabricated
+    percentile. Balanced Grove (all six tracks ≥ L2) is the headline when earned;
+    otherwise Daimon Level + earned badge count."""
+    level = _int(level)
+    if balanced:
+        return f"🌌 Balanced Grove · Level {level}"
+    badge_count = _int(badge_count)
+    badges = "badge" if badge_count == 1 else "badges"
+    return f"✨ Daimon Level {level} · {badge_count} {badges}"
+
+
+def _top_mix(work_mix: dict, n: int = 2) -> str:
+    """Top-n work-mix tracks as a bold dual-stat, e.g. '46% dev · 42% writing'."""
+    mix = sorted(((k, _int(v)) for k, v in (work_mix or {}).items() if _int(v) > 0),
+                 key=lambda kv: -kv[1])[:n]
+    return " · ".join(f"{v}% {_svg_text(k)}" for k, v in mix)
+
+
+def _grad(gid: str, stops, vertical: bool = True) -> str:
+    coords = 'x1="0" y1="0" x2="0" y2="1"' if vertical else 'x1="0" y1="0" x2="1" y2="0"'
+    body = "".join(f'<stop offset="{off}%" stop-color="{col}"/>' for col, off in stops)
+    return f'<linearGradient id="{gid}" {coords}>{body}</linearGradient>'
+
+
+# Per-size geometry. Vertical sizes (square / story) carry an explicit y-map so
+# the oversized hero never collides with the brand chip or identity block; the
+# link size is horizontal and handled separately. Coordinates are baselines.
+SD_SIZES = {
+    "square": {
+        "w": 1080, "h": 1080, "horizontal": False,
+        "brand": 120, "hero": 400, "hero_fs": 220, "sess": 470, "days": 515,
+        "youre": 610, "title": 686, "title_fs": 64, "tag": 736, "mix": 826,
+        "pill": 896, "foot": 1024,
+    },
+    "story": {
+        "w": 1080, "h": 1920, "horizontal": False,
+        "brand": 250, "hero": 760, "hero_fs": 300, "sess": 850, "days": 902,
+        "youre": 1040, "title": 1126, "title_fs": 76, "tag": 1182, "mix": 1300,
+        "pill": 1380, "foot": 1840,
+    },
+    "link": {"w": 1200, "h": 630, "horizontal": True},
+}
+
+
+def _card_vertical(cfg: dict, sid: str, sessions: str, days: int, title: str,
+                   tagline: str, mix_txt: str, pill: str) -> str:
+    """Hero-number identity card, vertical (square / story). One focal point:
+    the oversized session count in gradient numerals."""
+    w, h = cfg["w"], cfg["h"]
+    cx = w // 2
+    pill_w = max(360, 26 * len(pill))
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" '
+        f'width="{w}" height="{h}" font-family="{SD_CARD_FONT}">'
+        f'<defs>{_grad(f"sdbg-{sid}", SD_BG_STOPS)}'
+        f'{_grad(f"sdhero-{sid}", SD_HERO_STOPS, vertical=False)}</defs>'
+        f'<rect width="{w}" height="{h}" fill="url(#sdbg-{sid})"/>'
+        f'<text x="{cx}" y="{cfg["brand"]}" text-anchor="middle" font-size="34" '
+        f'font-weight="800" letter-spacing="3" fill="{SD_INK}">🏛 SKILLS DAIMON</text>'
+        # Hero
+        f'<text x="{cx}" y="{cfg["hero"]}" text-anchor="middle" font-size="{cfg["hero_fs"]}" '
+        f'font-weight="800" fill="url(#sdhero-{sid})" letter-spacing="-4">{sessions}</text>'
+        f'<text x="{cx}" y="{cfg["sess"]}" text-anchor="middle" font-size="46" '
+        f'font-weight="800" letter-spacing="8" fill="{SD_INK}">SESSIONS</text>'
+        f'<text x="{cx}" y="{cfg["days"]}" text-anchor="middle" font-size="28" '
+        f'fill="{SD_INK_SOFT}">in {_int(days)} days</text>'
+        # Identity
+        f'<text x="{cx}" y="{cfg["youre"]}" text-anchor="middle" font-size="30" '
+        f'fill="{SD_INK_SOFT}">You’re a</text>'
+        f'<text x="{cx}" y="{cfg["title"]}" text-anchor="middle" font-size="{cfg["title_fs"]}" '
+        f'font-weight="800" fill="{SD_INK}">{title}</text>'
+        f'<text x="{cx}" y="{cfg["tag"]}" text-anchor="middle" font-size="30" '
+        f'font-style="italic" fill="{SD_INK_SOFT}">{tagline}</text>'
+        f'<text x="{cx}" y="{cfg["mix"]}" text-anchor="middle" font-size="40" '
+        f'font-weight="700" fill="{SD_INK}">{mix_txt}</text>'
+        # Honest achievement pill
+        f'<rect x="{cx - pill_w // 2}" y="{cfg["pill"] - 38}" width="{pill_w}" height="56" '
+        f'rx="28" fill="#FFFFFF" fill-opacity="0.14"/>'
+        f'<text x="{cx}" y="{cfg["pill"]}" text-anchor="middle" font-size="26" '
+        f'font-weight="700" fill="{SD_INK}">{pill}</text>'
+        f'<text x="{cx}" y="{cfg["foot"]}" text-anchor="middle" font-size="20" '
+        f'fill="{SD_INK_SOFT}" fill-opacity="0.8">Generated locally from my own '
+        f'Claude Code usage · skills-daimon</text>'
+        '</svg>'
+    )
+
+
+def _card_horizontal(cfg: dict, sid: str, sessions: str, days: int, title: str,
+                     tagline: str, mix_txt: str, pill: str) -> str:
+    """Link / OG variant (1200×630): hero left, identity right. The right column
+    is anchored at its own center so long archetype names stay inside the card."""
+    w, h = cfg["w"], cfg["h"]
+    lx = 300            # left column center (hero)
+    rcx = 850           # right column center (identity) — 500px-wide column
+    pill_w = max(320, 22 * len(pill))
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" '
+        f'width="{w}" height="{h}" font-family="{SD_CARD_FONT}">'
+        f'<defs>{_grad(f"sdbg-{sid}", SD_BG_STOPS)}'
+        f'{_grad(f"sdhero-{sid}", SD_HERO_STOPS, vertical=False)}</defs>'
+        f'<rect width="{w}" height="{h}" fill="url(#sdbg-{sid})"/>'
+        f'<text x="60" y="78" font-size="26" font-weight="800" letter-spacing="3" '
+        f'fill="{SD_INK}">🏛 SKILLS DAIMON</text>'
+        # Hero (left)
+        f'<text x="{lx}" y="340" text-anchor="middle" font-size="190" font-weight="800" '
+        f'fill="url(#sdhero-{sid})" letter-spacing="-4">{sessions}</text>'
+        f'<text x="{lx}" y="402" text-anchor="middle" font-size="38" font-weight="800" '
+        f'letter-spacing="6" fill="{SD_INK}">SESSIONS</text>'
+        f'<text x="{lx}" y="444" text-anchor="middle" font-size="24" '
+        f'fill="{SD_INK_SOFT}">in {_int(days)} days</text>'
+        f'<line x1="585" y1="170" x2="585" y2="470" stroke="{SD_INK}" stroke-opacity="0.2"/>'
+        # Identity (right, center-anchored)
+        f'<text x="{rcx}" y="220" text-anchor="middle" font-size="26" '
+        f'fill="{SD_INK_SOFT}">You’re a</text>'
+        f'<text x="{rcx}" y="280" text-anchor="middle" font-size="50" font-weight="800" '
+        f'fill="{SD_INK}">{title}</text>'
+        f'<text x="{rcx}" y="324" text-anchor="middle" font-size="25" font-style="italic" '
+        f'fill="{SD_INK_SOFT}">{tagline}</text>'
+        f'<text x="{rcx}" y="390" text-anchor="middle" font-size="33" font-weight="700" '
+        f'fill="{SD_INK}">{mix_txt}</text>'
+        f'<rect x="{rcx - pill_w // 2}" y="420" width="{pill_w}" height="52" rx="26" '
+        f'fill="#FFFFFF" fill-opacity="0.14"/>'
+        f'<text x="{rcx}" y="453" text-anchor="middle" font-size="24" '
+        f'font-weight="700" fill="{SD_INK}">{pill}</text>'
+        f'<text x="{rcx}" y="555" text-anchor="middle" font-size="18" fill="{SD_INK_SOFT}" '
+        f'fill-opacity="0.8">Generated locally · skills-daimon</text>'
+        '</svg>'
+    )
+
+
+def build_share_card_svg(archetype: dict, work_mix: dict, sessions: int, days: int,
+                         level: int, badge_count: int, balanced: bool,
+                         size: str = "square") -> str:
+    """A self-contained, bold 'wrapped' poster — non-identifying only.
+
+    Hero-number identity card: an oversized session count as the single focal
+    point, the archetype as identity, the top work-mix split, and an honest
+    achievement pill (Daimon Level + badges, or Balanced Grove). `size` selects
+    `square` (1080×1080), `story` (1080×1920), or `link` (1200×630).
+
+    Deliberately excludes every identifying datum: project names/paths,
+    per-project session/commit counts, recommendations, and coaching text. The
+    aggregate session total is shown by explicit user opt-in. Pure inline SVG,
+    no external assets."""
+    cfg = SD_SIZES.get(size) or SD_SIZES["square"]
+    sid = size if size in SD_SIZES else "square"
     archetype = archetype or {}
     title = _svg_text(archetype.get("title", "Your archetype"))
     tagline = _svg_text(archetype.get("tagline", ""))
-
-    # Work-mix segmented bar (drawn as rects) + legend, matching report colors.
-    seg_colors = {"dev": "#6366f1", "writing": "#10b981", "data": "#f59e0b",
-                  "ops": "#ec4899", "other": "#9ca3af"}
-    mix = [(k, _int(v)) for k, v in (work_mix or {}).items() if _int(v) > 0]
-    bar_x, bar_y, bar_w, bar_h = 80, 470, 920, 34
-    segs = []
-    legend = []
-    cursor = bar_x
-    for k, v in mix:
-        w = round(bar_w * v / 100)
-        col = seg_colors.get(k, seg_colors["other"])
-        segs.append(f'<rect x="{cursor}" y="{bar_y}" width="{w}" height="{bar_h}" fill="{col}"/>')
-        legend.append(f'{_svg_text(k)} {v}%')
-        cursor += w
-    bar_bg = f'<rect x="{bar_x}" y="{bar_y}" width="{bar_w}" height="{bar_h}" rx="17" fill="#E5E7EB"/>'
-    bar_clip = (
-        f'<clipPath id="sd-barclip"><rect x="{bar_x}" y="{bar_y}" width="{bar_w}" '
-        f'height="{bar_h}" rx="17"/></clipPath>'
-    )
-    bar_segs = f'<g clip-path="url(#sd-barclip)">{"".join(segs)}</g>' if segs else ""
-    legend_txt = " · ".join(legend) if legend else ""  # entries already escaped via _svg_text
-
-    # Nest the grove SVG into a slot (it carries its own 0 0 900 280 viewBox).
-    grove_svg = ""
-    try:
-        import gamify as _gamify  # type: ignore
-        raw = _gamify.render_grove_svg(grove or {})
-        # Re-anchor the returned <svg ...> into our poster's coordinate space.
-        # Strip its own width/height/x/y/preserveAspectRatio from the opening tag
-        # first (keeping its viewBox) so we don't emit duplicate attributes.
-        mo = re.match(r"<svg\b([^>]*)>", raw)
-        if mo:
-            attrs = re.sub(r'\s(?:width|height|x|y|preserveAspectRatio)="[^"]*"', "", mo.group(1))
-            new_open = ('<svg x="40" y="560" width="1000" height="320" '
-                        'preserveAspectRatio="xMidYMid meet"' + attrs + '>')
-            raw = new_open + raw[mo.end():]
-            # Namespace the grove's internal ids so the preview copy in the live
-            # DOM never collides with the report's other grove SVGs (no dup ids).
-            grove_svg = re.sub(r'(\bid="|url\(#)(grove_)', r'\1sd-\2', raw)
-        else:
-            # Unexpected shape — drop the grove rather than inject unanchored markup.
-            grove_svg = ""
-    except Exception:
-        grove_svg = ""
-
-    return (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" '
-        'width="1080" height="1080" font-family="-apple-system,Segoe UI,Roboto,sans-serif">'
-        '<rect width="1080" height="1080" fill="#F8F7F3"/>'
-        '<rect x="40" y="40" width="1000" height="1000" rx="28" fill="#FFFFFF" stroke="#E5E7EB"/>'
-        f'{bar_clip}'
-        '<text x="80" y="150" font-size="30" font-weight="700" fill="#6D28D9">🏛 Skills Daimon</text>'
-        '<text x="80" y="300" font-size="22" font-weight="600" fill="#6B7280">Your archetype</text>'
-        f'<text x="80" y="372" font-size="62" font-weight="800" fill="#171717">{title}</text>'
-        f'<text x="80" y="424" font-size="26" font-style="italic" fill="#374151">{tagline}</text>'
-        f'{bar_bg}{bar_segs}'
-        f'<text x="80" y="540" font-size="22" fill="#6B7280">{legend_txt}</text>'
-        f'{grove_svg}'
-        f'<rect x="80" y="930" width="360" height="56" rx="28" fill="#EDE9FE"/>'
-        f'<text x="104" y="967" font-size="24" font-weight="800" fill="#6D28D9">Daimon Level {_int(level)}</text>'
-        f'<text x="300" y="967" font-size="22" font-weight="500" fill="#6D28D9">· {_int(xp)} XP</text>'
-        '<text x="80" y="1010" font-size="18" fill="#9CA3AF">Generated locally from my own Claude Code usage · skills-daimon</text>'
-        '</svg>'
-    )
+    sessions_txt = _svg_text(f"{_int(sessions):,}")
+    mix_txt = _top_mix(work_mix) or _svg_text("a mix of work")
+    pill = _svg_text(share_pill_text(level, badge_count, balanced))
+    builder = _card_horizontal if size == "link" else _card_vertical
+    return builder(cfg, sid, sessions_txt, days, title, tagline, mix_txt, pill)
 
 
 def simple_primary_action_card(a: dict) -> str:
@@ -1332,10 +1462,11 @@ def simple_coach_block(coaching: list) -> str:
     return '<section><h2 class="sec">⚑ Habits to tweak</h2>' + "".join(cards) + '</section>'
 
 
-def simple_view(payload: dict, m: dict, grove_html: str, share_svg: str = "") -> str:
+def simple_view(payload: dict, m: dict, grove_html: str,
+                share_cards: dict | None = None, share_caption: str = "") -> str:
     """The default, easy-to-scan view: Primary action · Recommendations ·
     Coaching · Daimon Grove, with a button to switch to the advanced report and
-    a button to download a shareable archetype card."""
+    a one-tap button to share a brandable archetype card."""
     days = esc(m.get("days", 28))
     # Full five-part archetype section (label, title, tagline, why/strength/
     # watch-out/next ritual) — same card the advanced view uses.
@@ -1344,19 +1475,38 @@ def simple_view(payload: dict, m: dict, grove_html: str, share_svg: str = "") ->
     recs = simple_recs_block(payload.get("recommendations") or [])
     coach = simple_coach_block(payload.get("coaching") or [])
 
-    # Share card: opt-in, leak-free. The SVG is held in a non-rendered <template>;
-    # a button downloads it client-side. A <details> lets the user preview first.
+    # Share card: opt-in, leak-free. Each size's SVG lives in a non-rendered
+    # <template>; JS rasterizes the picked size to PNG and opens the native
+    # share sheet (caption pre-filled), falling back to download + X intent.
     share_btn = ""
     share_block = ""
-    if share_svg:
-        share_btn = ('<button class="viewtoggle share" onclick="sdDownloadCard()">'
+    share_cards = share_cards or {}
+    if share_cards:
+        caption_js = json.dumps({"caption": share_caption,
+                                 "hashtag": "SkillsDaimon"})
+        templates = "".join(
+            f'<template id="sd-card-{sz}">{svg}</template>'
+            for sz, svg in share_cards.items() if svg
+        )
+        preview_svg = share_cards.get("square") or next(iter(share_cards.values()), "")
+        share_btn = ('<button class="viewtoggle share" onclick="sdShareCard()">'
                      '🔗 Share my archetype</button>')
         share_block = (
-            f'<template id="sd-share-card">{share_svg}</template>'
-            '<details class="share-preview"><summary>Preview share card</summary>'
-            f'{share_svg}'
-            '<p class="share-hint">Downloads as an SVG image — opens in any browser; '
-            'export to PNG if a site needs raster. Nothing is uploaded.</p>'
+            f'<script>window.__sdShare={caption_js};</script>'
+            f'{templates}'
+            '<details class="share-preview"><summary>Preview &amp; pick a size</summary>'
+            '<div class="share-sizes"><label for="sd-size">Size</label>'
+            '<select id="sd-size">'
+            '<option value="square">Square · 1080×1080 (feed)</option>'
+            '<option value="story">Story · 1080×1920 (IG/TikTok)</option>'
+            '<option value="link">Link · 1200×630 (X/LinkedIn)</option>'
+            '</select>'
+            '<button class="viewtoggle" onclick="sdDownloadCard()">Download PNG</button>'
+            '</div>'
+            f'{preview_svg}'
+            '<p class="share-hint">Exports as PNG — one tap opens your share sheet '
+            'with a caption ready. Aggregate only; no project names or counts. '
+            'Nothing is uploaded.</p>'
             '</details>'
         )
 
@@ -1385,19 +1535,32 @@ def render(payload: dict) -> str:
 
     level_chip_html, quest_html, grove_html, game_state = _gamify_blocks(payload, m)
 
-    # Build the shareable archetype card SVG from non-identifying bits only.
-    share_svg = ""
+    # Build the shareable archetype cards (3 sizes) from non-identifying bits
+    # only, plus a pre-filled caption with a curiosity hook.
+    share_cards: dict = {}
+    share_caption = ""
     if game_state:
         try:
-            share_svg = build_share_card_svg(
-                payload.get("archetype") or {},
-                (payload.get("work_recap") or {}).get("mix") or {},
-                game_state.get("grove") or {},
-                int(game_state.get("daimon_level") or 0),
-                int(game_state.get("xp_total") or 0),
+            archetype = payload.get("archetype") or {}
+            work_mix = (payload.get("work_recap") or {}).get("mix") or {}
+            grove = game_state.get("grove") or {}
+            level = int(game_state.get("daimon_level") or 0)
+            badge_count = int(game_state.get("badge_count") or 0)
+            balanced = bool(grove.get("balanced"))
+            sessions = int(m.get("sessions") or 0)
+            days = int(m.get("days") or 0)
+            for sz in ("square", "story", "link"):
+                share_cards[sz] = build_share_card_svg(
+                    archetype, work_mix, sessions, days,
+                    level, badge_count, balanced, size=sz,
+                )
+            arch_title = (archetype.get("title") or "").strip() or "an evolving archetype"
+            share_caption = (
+                f"I'm {arch_title} this month — {sessions:,} Claude Code sessions in. "
+                "What's your archetype?"
             )
         except Exception:
-            share_svg = ""
+            share_cards, share_caption = {}, ""
 
     # ─── COMBINED HERO (verdict + archetype + Daimon Level in one card) ───
     hero_html = hero_card(
@@ -1542,7 +1705,7 @@ def render(payload: dict) -> str:
 
     # Simple view (default) — easy to scan; Advanced view (hidden) is the full
     # report. A button on each toggles between them. One self-contained file.
-    simple_html = simple_view(payload, m, grove_html, share_svg)
+    simple_html = simple_view(payload, m, grove_html, share_cards, share_caption)
     advanced_html = (
         '<div id="view-advanced" style="display:none">'
         + sidebar_html

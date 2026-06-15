@@ -370,92 +370,72 @@ class TestShareCard(unittest.TestCase):
             "stuck_loops": [], "installed_skills": [], "recurring_prompts": [], "completion": {},
         }
 
-    def test_card_svg_has_archetype_and_mix_no_identifying_data(self):
+    def test_card_svg_has_archetype_and_hero_no_identifying_data(self):
         svg = render_report.build_share_card_svg(
             {"title": "The Builder-Scribe", "tagline": "tag"},
             {"dev": 48, "writing": 42, "data": 5, "ops": 5},
-            {"command_tree_level": 2}, level=3, xp=120)
+            475, 28, level=3, badge_count=2, balanced=False)
         self.assertTrue(svg.lstrip().startswith("<svg"))
         self.assertIn("The Builder-Scribe", svg)
-        self.assertIn("dev 48%", svg)
+        self.assertIn("475", svg)        # hero session count (opt-in aggregate)
+        self.assertIn("48% dev", svg)
         self.assertIn("Daimon Level 3", svg)
-        # No identifying data: no project paths/names, counts, recs, coaching.
-        for leak in ("/Users/", "Secret-Project", "sessions", "CLAUDE.md", "git push"):
+        # No identifying data: no project paths/names, per-project counts, recs.
+        # (The aggregate session total IS shown by design; project data is not.)
+        for leak in ("/Users/", "Secret-Project", "CLAUDE.md", "git push"):
             self.assertNotIn(leak, svg)
 
     def test_card_svg_is_self_contained(self):
         svg = render_report.build_share_card_svg({"title": "T"}, {"dev": 100},
-                                                 {}, level=1, xp=0)
+                                                 10, 28, level=1, badge_count=0,
+                                                 balanced=False)
         import re
         self.assertEqual(re.findall(r'(?:href|src)="https?://', svg), [])
 
-    def test_card_svg_is_well_formed_xml_with_nested_grove(self):
+    def test_card_svg_well_formed_each_size(self):
         import xml.dom.minidom as M
-        svg = render_report.build_share_card_svg(
-            {"title": "T", "tagline": "x"}, {"dev": 60, "writing": 40},
-            {"command_tree_level": 3, "memory_well_level": 2}, level=2, xp=80)
-        M.parseString(svg)  # raises if malformed (e.g. duplicate attributes)
-        self.assertGreaterEqual(svg.count("<svg"), 2)  # poster + nested grove
-
-    def test_nested_grove_ids_are_namespaced(self):
-        # The preview copy lands in the live DOM alongside the report's own
-        # grove SVGs; its internal ids must be namespaced to avoid dup-id clashes.
-        svg = render_report.build_share_card_svg(
-            {"title": "T"}, {"dev": 100},
-            {"command_tree_level": 3, "memory_well_level": 2}, level=2, xp=80)
-        if "grove_" in svg:  # only when a grove was actually nested
-            self.assertIn("sd-grove_", svg)
-            self.assertNotIn('id="grove_', svg)
-            self.assertNotIn("url(#grove_", svg)
+        for size in ("square", "story", "link"):
+            svg = render_report.build_share_card_svg(
+                {"title": "T", "tagline": "x"}, {"dev": 60, "writing": 40},
+                123, 28, level=2, badge_count=1, balanced=False, size=size)
+            M.parseString(svg)  # raises if malformed (e.g. duplicate attributes)
 
     def test_card_svg_strips_xml_illegal_control_chars(self):
         import xml.dom.minidom as M
         svg = render_report.build_share_card_svg(
             {"title": "Bad\x07Title", "tagline": "tag\x00line"}, {"dev": 100},
-            {}, level=1, xp=0)
+            5, 28, level=1, badge_count=0, balanced=False)
         M.parseString(svg)  # would raise "not well-formed" if control chars leaked
         self.assertNotIn("\x07", svg)
         self.assertNotIn("\x00", svg)
 
-    def test_card_svg_does_not_echo_identifying_values(self):
-        # Even if identifying-looking strings are passed in, only title/tagline
-        # render; salted path/count values must never appear in the poster.
-        svg = render_report.build_share_card_svg(
-            {"title": "The Builder-Scribe", "tagline": "tag"},
-            {"dev": 48, "writing": 42, "data": 5, "ops": 5},
-            {"command_tree_level": 2}, level=3, xp=120)
-        self.assertIn("The Builder-Scribe", svg)
-        self.assertIn("dev 48%", svg)
-        for leak in ("/Users/", "Secret-Project", "sessions", "CLAUDE.md", "git push"):
-            self.assertNotIn(leak, svg)
-
     def test_empty_archetype_falls_back_to_default_title(self):
-        svg = render_report.build_share_card_svg({}, {}, {}, level=0, xp=0)
+        svg = render_report.build_share_card_svg({}, {}, 0, 28, level=0,
+                                                 badge_count=0, balanced=False)
         self.assertTrue(svg.lstrip().startswith("<svg"))
         self.assertIn("Your archetype", svg)
 
     def test_tolerant_of_non_numeric_mix(self):
         # A stray non-numeric mix value must not crash the poster.
         svg = render_report.build_share_card_svg(
-            {"title": "T"}, {"dev": "oops", "writing": 40}, {}, level=1, xp=1)
+            {"title": "T"}, {"dev": "oops", "writing": 40}, 5, 28,
+            level=1, badge_count=1, balanced=False)
         self.assertTrue(svg.lstrip().startswith("<svg"))
-        self.assertIn("writing 40%", svg)
+        self.assertIn("40% writing", svg)
 
-    def test_render_embeds_share_button_and_download_js(self):
+    def test_render_embeds_share_button_and_png_js(self):
         html = render_report.render(self._payload())
         self.assertIn("🔗 Share my archetype", html)
-        self.assertIn('id="sd-share-card"', html)
-        self.assertIn("function sdDownloadCard", html)
+        self.assertIn('id="sd-card-square"', html)
+        self.assertIn("function sdShareCard", html)
+        self.assertIn("image/png", html)  # rasterizes to PNG, not SVG-to-social
         # the user's real project path must not leak into the card template region
         self.assertNotIn("/Users/me/Secret-Project", html)
-        # the share-card preview's grove ids are namespaced (so they don't collide
-        # with the report's own grove SVGs in the live DOM)
-        self.assertIn("sd-grove_", html)
 
     def test_simple_view_without_card_has_no_share_button(self):
-        html = render_report.simple_view(self._payload(), {}, "", share_svg="")
+        html = render_report.simple_view(self._payload(), {}, "", share_cards={})
         self.assertNotIn("🔗 Share my archetype", html)
-        self.assertNotIn('id="sd-share-card"', html)
+        self.assertNotIn('id="sd-card-square"', html)
 
 
 class TestBasename(unittest.TestCase):
