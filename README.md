@@ -69,7 +69,12 @@ This copies the scripts into `~/.codex/skills/skills-daimon/` with a Codex-nativ
 python3 ~/.codex/skills/skills-daimon/bin/run.py --days 28 --source codex
 ```
 
-`--source auto` (the default) picks Codex when no Claude Code sessions are present, so a Codex-only machine needs no flag. Reports and history land under `~/.codex/skills/skills-daimon/` (override with `SKILLS_DAIMON_HOME`). Codex has no per-session outcome labels, so the "finished %" rows read no-data — expected. Only `python3` is required; `npx` unlocks the live skills.sh registry query.
+The Codex-installed skill forces `--source codex`, so mixed machines with both
+Claude Code and Codex history still report Codex usage. Reports and history land
+under `~/.codex/skills/skills-daimon/` (override with `SKILLS_DAIMON_HOME`).
+Codex has no per-session outcome labels, so the "finished %" rows read no-data —
+expected. Only `python3` is required; `npx` unlocks the live skills.sh registry
+query.
 
 ## The three skills
 

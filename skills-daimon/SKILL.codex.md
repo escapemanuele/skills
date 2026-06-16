@@ -32,16 +32,17 @@ path). They need only `python3` (stdlib) and, for the live registry query,
 
 Let `SD="${CODEX_HOME:-$HOME/.codex}/skills/skills-daimon/bin"`.
 
-1. **Run** — `python3 "$SD/run.py" --days 28 --budget compact`
+1. **Run** — `python3 "$SD/run.py" --days 28 --budget compact --source codex`
    Scans, analyzes, stages `payload.json`/`snapshot.json` in a workdir, and
    prints a slim summary — `source`, gates, file paths, the markdown skeleton
    (verdict, archetype, scorecard, coaching all precomputed; rates carry
    denominators), `job_signals` for clustering, and ready-made `trends` rows.
-   - **Source:** defaults to `--source auto`, which scans Codex
-     (`~/.codex/sessions`) when Claude Code sessions aren't present. On a
-     Codex-only machine you can omit the flag. Codex has no per-session outcome
-     labels and no built-in Grep/Glob/Read, so the "finished %" scorecard rows
-     and the shell-vs-built-in signal read no-data — expected, not a bug.
+   - **Source:** force `--source codex` for this Codex-installed skill. Auto
+     detection prefers Claude Code sessions when they exist, which is wrong when
+     the user asks from inside Codex on a mixed machine. Codex has no
+     per-session outcome labels and no built-in Grep/Glob/Read, so the
+     "finished %" scorecard rows and the shell-vs-built-in signal read no-data
+     — expected, not a bug.
    - **GATE A:** if `gates.session_count == 0` → STOP, tell the user there's no recent data.
    - **GATE B:** if `gates.catalogs` is empty → emit zero catalog-backed recs (coaching may still run).
 2. **Recommend** — cluster 3–5 jobs from `job_signals` + the skeleton, then **one
