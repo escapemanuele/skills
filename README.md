@@ -117,6 +117,18 @@ skills/                              # repo (escapemanuele/skills)
         └── redact.py                # vendored secret scrubber
 ```
 
+## Also in this repo: agent orchestration system
+
+[`orchestration/`](orchestration/) is a separate, self-contained system (not part of the skills-daimon plugin): role-based multi-agent workflows for Claude Code — `/feature`, `/bug`, `/review` slash skills orchestrating four narrowly-scoped subagents (read-only explorer, bounded implementer, independent reviewer, test runner) in a star topology, plus an adversarial cross-family Codex review pass. Roles are stable; model bindings are swappable via evals (`MODEL-POLICY.md`, `EVALS.md`).
+
+Install:
+
+```bash
+./orchestration/install.sh
+```
+
+See [`orchestration/README.md`](orchestration/README.md).
+
 ## License
 
 MIT
