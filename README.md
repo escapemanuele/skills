@@ -1,8 +1,6 @@
 # Claude Code skills & agents
 
-Stuff I built for [Claude Code](https://claude.com/claude-code), Anthropic's AI coding assistant. There are two separate things in this repo, and you can install either one without the other:
-
-1. **Three skills that help you get better at using Claude Code.** One reads your past sessions and shows you what you keep doing the hard way. The other two fix the most common problems it finds.
+1. **skills daimon**: Reads your past sessions and shows you what to do to improve your AI usage.
 2. **A small AI team for coding work.** Instead of one AI doing everything in one go, you get a team with clear jobs: one plans, one reads the code, one writes the change, one runs the tests, one double-checks everything. You drive it with three commands: `/feature`, `/bug`, `/review`.
 
 ## Part 1: the three skills
