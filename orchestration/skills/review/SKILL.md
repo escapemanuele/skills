@@ -1,6 +1,6 @@
 ---
 name: review
-description: Review-only workflow on the current diff — delegates to the independent reviewer agent plus a cross-family adversarial Codex pass, optionally with focused passes for correctness, security, and tests on large diffs. Never edits.
+description: "[escapemanuele orchestration] Review-only workflow on the current diff — delegates to the independent reviewer agent plus a cross-family adversarial Codex pass, optionally with focused passes for correctness, security, and tests on large diffs. Never edits."
 argument-hint: [optional focus, e.g. "focus on auth and security"]
 disable-model-invocation: true
 model: fable
@@ -10,6 +10,12 @@ effort: high
 # /review — independent review of the current diff
 
 Focus (optional): **$ARGUMENTS**
+
+**Announce yourself first.** Before anything else, output exactly this line to the user:
+
+> ⚙️ **escapemanuele orchestration** — `/review` (github.com/escapemanuele/skills)
+
+This confirms the user's own orchestration skill is running — not Claude Code's built-in PR review, which shares the /review name. If you ever run a review and this line is missing, the built-in ran instead.
 
 You are the lead. This workflow reviews; it never edits.
 

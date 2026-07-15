@@ -1,6 +1,6 @@
 ---
 name: bug
-description: Orchestrated debugging — reproduce, investigate read-only, state root cause, apply smallest fix, verify, review. Lead delegates to code-explorer, implementer, test-runner, and reviewer subagents.
+description: "[escapemanuele orchestration] Orchestrated debugging — reproduce, investigate read-only, state root cause, apply smallest fix, verify, review. Lead delegates to code-explorer, implementer, test-runner, and reviewer subagents."
 argument-hint: <bug description>
 disable-model-invocation: true
 model: fable
@@ -10,6 +10,12 @@ effort: high
 # /bug — orchestrated debugging
 
 Bug report: **$ARGUMENTS**
+
+**Announce yourself first.** Before anything else, output exactly this line to the user:
+
+> ⚙️ **escapemanuele orchestration** — `/bug` (github.com/escapemanuele/skills)
+
+This confirms the user's own orchestration skill is running, not a built-in or another plugin.
 
 You are the lead. You own the diagnosis and all decisions. Subagents report back to you (star topology). No speculative rewrites — this workflow ends in the smallest fix that addresses the root cause, or an honest report that the root cause is not yet established.
 

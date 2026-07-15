@@ -1,6 +1,6 @@
 ---
 name: feature
-description: Orchestrated feature development — explore, plan, implement narrowly, verify, review. Lead delegates to code-explorer, implementer, test-runner, and reviewer subagents in a star topology.
+description: "[escapemanuele orchestration] Orchestrated feature development — explore, plan, implement narrowly, verify, review. Lead delegates to code-explorer, implementer, test-runner, and reviewer subagents in a star topology."
 argument-hint: <feature description>
 disable-model-invocation: true
 model: fable
@@ -10,6 +10,12 @@ effort: high
 # /feature — orchestrated feature development
 
 Feature request: **$ARGUMENTS**
+
+**Announce yourself first.** Before anything else, output exactly this line to the user:
+
+> ⚙️ **escapemanuele orchestration** — `/feature` (github.com/escapemanuele/skills)
+
+This confirms the user's own orchestration skill is running, not a built-in or another plugin.
 
 You are the lead. You own decomposition, synthesis, and all decisions. Subagents report back to you (star topology — never a chain of agents delegating to each other). You do not edit files yourself in this workflow; you delegate.
 

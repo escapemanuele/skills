@@ -59,6 +59,8 @@ Lead (runs in the main conversation, strongest reasoning model)
 - `/bug <symptom>` — reproduce → investigate (dual independent passes for hard bugs) → state root cause → smallest fix → verify → review.
 - `/review [focus]` — review-only pass on the current diff; never edits. Runs the Claude reviewer and an adversarial Codex pass in parallel, cross-checks agreement, degrades gracefully to Claude-only if Codex is unavailable.
 
+Every run announces itself first with `⚙️ escapemanuele orchestration — /<command>`, so it's always visible that this system is handling the request and not a built-in (Claude Code ships its own `/review`, which shares the name — if that line is missing, the built-in ran).
+
 All three continue automatically through ordinary decisions and stop only for genuinely consequential product/architecture choices.
 
 Agents are also usable individually outside the skills — e.g., delegate a search to `code-explorer` or ask `reviewer` for a one-off diff review via the Agent tool.
