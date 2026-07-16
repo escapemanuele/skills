@@ -81,6 +81,78 @@ class TestTokenBlockHtml(unittest.TestCase):
         self.assertNotIn("<x>", html)
 
 
+class TestBuildTokenSavings(unittest.TestCase):
+    def _m(self, **over):
+        m = {"bypass_saved_tokens": 0, "error_waste_tokens": 0,
+             "bypass_out_tokens": 0, "bypass_native_est_tokens": 0,
+             "window_tokens": 0}
+        m.update(over)
+        return m
+
+    def test_none_when_below_threshold(self):
+        self.assertIsNone(analyze.build_token_savings(self._m(bypass_saved_tokens=500)))
+
+    def test_headline_with_bypass_and_errors(self):
+        s = analyze.build_token_savings(self._m(
+            bypass_saved_tokens=50_000, bypass_out_tokens=60_000,
+            bypass_native_est_tokens=10_000, error_waste_tokens=7_000,
+            window_tokens=2_700_000))
+        self.assertEqual(s["estimated_saved_tokens"], 57_000)
+        self.assertEqual(s["pct_of_window"], 2)
+        self.assertIn("~57k tokens", s["headline"])
+        self.assertIn("60k tokens", s["headline"])
+        self.assertIn("~10k", s["headline"])
+        self.assertIn("7k", s["headline"])
+
+    def test_no_pct_without_window(self):
+        s = analyze.build_token_savings(self._m(error_waste_tokens=5_000))
+        self.assertNotIn("pct_of_window", s)
+        self.assertIn("~5k tokens", s["headline"])
+
+
+class TestSavingsMetrics(unittest.TestCase):
+    def test_metrics_compute_savings_from_measured_chars(self):
+        scan = {
+            "session_count": 10,
+            "coaching_signals": {
+                "native_tool_bypass": {
+                    "bash_total": 100, "bypass_total": 50,
+                    "bypass_calls": {"grep": 50},
+                    "bypass_result_chars": 400_000,     # → 100k tokens
+                    "bypass_results_measured": 50,
+                    "native_result_chars": 40_000,      # → 10k tokens over 20 calls
+                    "native_results_measured": 20,      # avg 500 tokens/call
+                },
+                "bash_error_chars": 8_000,              # → 2k tokens
+            },
+            "work_recap": {"top_projects": [{"tokens": 1_000_000}]},
+        }
+        m = analyze.compute_metrics(scan)
+        self.assertEqual(m["bypass_out_tokens"], 100_000)
+        self.assertEqual(m["bypass_native_est_tokens"], 25_000)  # 50 × 500
+        self.assertEqual(m["bypass_saved_tokens"], 75_000)
+        self.assertEqual(m["error_waste_tokens"], 2_000)
+        self.assertEqual(m["window_tokens"], 1_000_000)
+
+    def test_fallback_native_avg_and_zero_floor(self):
+        scan = {
+            "session_count": 10,
+            "coaching_signals": {
+                "native_tool_bypass": {
+                    "bash_total": 100, "bypass_total": 50,
+                    "bypass_calls": {"grep": 50},
+                    "bypass_result_chars": 40_000,      # → 10k tokens
+                    "bypass_results_measured": 50,
+                    "native_result_chars": 0,
+                    "native_results_measured": 0,       # < 10 → fallback 300/call
+                },
+            },
+        }
+        m = analyze.compute_metrics(scan)
+        self.assertEqual(m["bypass_native_est_tokens"], 15_000)  # 50 × 300
+        self.assertEqual(m["bypass_saved_tokens"], 0)            # floored, never negative
+
+
 class TestAnalyzeIntegration(unittest.TestCase):
     def test_token_tips_in_payload_and_markdown(self):
         scan = {
@@ -95,6 +167,38 @@ class TestAnalyzeIntegration(unittest.TestCase):
         self.assertTrue(out["token_tips"])
         self.assertIn("token_tips", out["html_payload"])
         self.assertIn("💸 Trim token usage", out["markdown_report"])
+
+    def test_savings_banner_in_markdown_and_payload(self):
+        scan = {
+            "session_count": 100, "max_age_days": 28,
+            "coaching_signals": {
+                "native_tool_bypass": {
+                    "bash_total": 2351, "bypass_total": 440,
+                    "bypass_calls": {"grep": 243, "cat": 93},
+                    "bypass_result_chars": 400_000,
+                    "bypass_results_measured": 400,
+                    "native_result_chars": 100_000,
+                    "native_results_measured": 100,
+                },
+                "bash_error_chars": 20_000,
+            },
+            "work_recap": {"top_projects": [{"tokens": 2_000_000}]},
+        }
+        out = analyze.analyze(scan)
+        self.assertIsNotNone(out["token_savings"])
+        self.assertIn("Doing it the daimon way", out["markdown_report"])
+
+
+class TestSavingsBannerHtml(unittest.TestCase):
+    def test_banner_rendered_when_present(self):
+        html = rr.simple_token_block(
+            [{"title": "t", "evidence": "e", "tip": "x"}],
+            {"headline": "Doing it the daimon way would have saved ~57k tokens."})
+        self.assertIn("~57k tokens", html)
+
+    def test_no_banner_without_savings(self):
+        html = rr.simple_token_block([{"title": "t", "evidence": "e", "tip": "x"}], None)
+        self.assertNotIn("daimon way", html)
 
 
 if __name__ == "__main__":

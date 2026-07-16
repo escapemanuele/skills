@@ -624,6 +624,15 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
     # --- coaching signals ---
     total_bash = 0
     bypass_calls = collections.Counter()       # native-tool bypass verbs
+    # --- measured token waste (chars of tool_result output; tokens ≈ chars/4).
+    # Search verbs only (grep/rg/find/awk) vs Grep/Glob: a like-for-like
+    # comparison. cat/head/tail→Read is roughly cost-neutral, so it never
+    # counts toward "avoidable" — keeps the savings estimate honest.
+    bypass_result_chars = 0                    # output of search-bypass shell calls
+    bypass_results_measured = 0
+    native_result_chars = 0                    # output of Grep/Glob calls
+    native_results_measured = 0
+    bash_error_chars = 0                       # output of errored Bash calls
     destructive = collections.Counter()        # label -> count
     destructive_samples: dict[str, str] = {}   # label -> one real command
     curl_hosts = collections.Counter()         # host -> count
@@ -724,6 +733,7 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
 
         # Per-session maps reset.
         tool_use_id_to_name: dict[str, str] = {}
+        tool_use_id_bypass: set[str] = set()
         session_has_memory = False
         # (timestamp ISO, command_string) per Bash use — for stuck-loop detection.
         session_bash_events: list[tuple[str, str]] = []
@@ -779,6 +789,18 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
                                 rt = ""
                             if rt and PR_URL_RE.search(rt):
                                 prs_via_url += 1
+                            # Measured token waste: size the actual output that
+                            # landed in context (tokens ≈ chars/4, applied later).
+                            if rt:
+                                if tr.get("is_error") is True:
+                                    if tname == "Bash":
+                                        bash_error_chars += len(rt)
+                                elif tu_id in tool_use_id_bypass:
+                                    bypass_result_chars += len(rt)
+                                    bypass_results_measured += 1
+                                elif tname in ("Grep", "Glob"):
+                                    native_result_chars += len(rt)
+                                    native_results_measured += 1
                         text = content_to_text(msg.get("content"))
                         if not is_caveat_or_system(text):
                             session_user_msgs += 1
@@ -849,6 +871,8 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
                                     base = verb.split()[0]
                                     if base in SEARCH_READ_BYPASS:
                                         bypass_calls[base] += 1
+                                        if tu_id and base in ("grep", "rg", "find", "awk"):
+                                            tool_use_id_bypass.add(tu_id)
                                     # Work-recap: dev signal from build/VCS verbs
                                     if base in DEV_VERBS:
                                         work_mix["dev"] += 1
@@ -968,7 +992,13 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
             "bypass_total": sum(bypass_calls.values()),
             "suggested_tool": {v: SEARCH_READ_BYPASS[v] for v in bypass_calls},
             "native_tool_use": native_native_use,
+            "bypass_result_chars": bypass_result_chars,
+            "bypass_results_measured": bypass_results_measured,
+            "native_result_chars": native_result_chars,
+            "native_results_measured": native_results_measured,
         },
+        # Output of errored Bash calls (chars) — pure context waste.
+        "bash_error_chars": bash_error_chars,
         # Risky commands seen (with one real sample each).
         "destructive_cmds": [
             {"label": lbl, "count": destructive[lbl], "sample": destructive_samples.get(lbl, "")}

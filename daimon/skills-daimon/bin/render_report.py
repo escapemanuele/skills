@@ -1492,10 +1492,16 @@ def simple_coach_block(coaching: list) -> str:
     return '<section><h2 class="sec">⚑ Habits to tweak</h2>' + "".join(cards) + '</section>'
 
 
-def simple_token_block(token_tips: list) -> str:
-    """Token-cost tips — each cites a hard count and names a cheaper habit."""
+def simple_token_block(token_tips: list, token_savings: dict | None = None) -> str:
+    """Token-cost tips — each cites a hard count and names a cheaper habit.
+    When measured, a savings banner leads: what the daimon way would have saved."""
     if not token_tips:
         return ""
+    banner = ""
+    if token_savings and token_savings.get("headline"):
+        banner = ('<div class="card simple-coach simple-token">'
+                  f'<p class="scbetter"><b>{esc(token_savings["headline"])}</b></p>'
+                  '</div>')
     cards = []
     for t in token_tips:
         cards.append(
@@ -1507,7 +1513,7 @@ def simple_token_block(token_tips: list) -> str:
         )
     return ('<section><h2 class="sec">💸 Trim token usage</h2>'
             '<p class="simple-note">Cheaper habits that keep context small — '
-            'each tied to a real count.</p>' + "".join(cards) + '</section>')
+            'each tied to a real count.</p>' + banner + "".join(cards) + '</section>')
 
 
 def simple_view(payload: dict, m: dict, grove_html: str,
@@ -1522,7 +1528,8 @@ def simple_view(payload: dict, m: dict, grove_html: str,
     pa = simple_primary_action_card(payload.get("primary_action") or {})
     recs = simple_recs_block(payload.get("recommendations") or [])
     coach = simple_coach_block(payload.get("coaching") or [])
-    token = simple_token_block(payload.get("token_tips") or [])
+    token = simple_token_block(payload.get("token_tips") or [],
+                               payload.get("token_savings"))
 
     # Share card: opt-in, leak-free. Each size's SVG lives in a non-rendered
     # <template>; JS rasterizes the picked size to PNG and opens the native

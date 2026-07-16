@@ -46,6 +46,7 @@ TREND_LABELS = {
     "search_shell_pct": ("Shell search share", "%"),
     "bash_error_pct": ("Bash error rate", "%"),
     "memory_rate_pct": ("Memory usage", "%"),
+    "token_saved_estimate": ("Est. tokens avoidable", ""),
 }
 
 

@@ -108,6 +108,19 @@ Privacy: `stuck_loops[].command` is for this run's coaching only — never into 
 history snapshot. The redacted summary may appear in the markdown report; the raw
 command never in `history.jsonl`.
 
+## Token savings estimate (💸 section lead)
+
+`build_token_savings` compares measured waste against the daimon way, from real
+tool-result sizes (tokens ≈ chars/4):
+
+- **Search bypass**: output of shell grep/rg/find/awk calls vs the same number of
+  lookups at the measured Grep/Glob average (fallback 300 tokens/call when <10
+  native calls measured). Saved = measured − estimated, floored at 0. cat/head→Read
+  is cost-neutral and never counted.
+- **Error waste**: output of errored Bash calls — pure context cost.
+- Headline renders only when the total ≥1000 tokens; percentages carry the window
+  token denominator. Never a fabricated number — no measurement, no banner.
+
 ## Worth building yourself (gaps)
 
 Jobs the user does often where no catalog skill fits. One-line bullet each, job

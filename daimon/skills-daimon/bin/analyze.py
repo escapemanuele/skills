@@ -74,6 +74,16 @@ def _pct(num: int, den: int) -> int | None:
     return round(100 * num / den)
 
 
+def _fmt_tokens(n: int) -> str:
+    """Human token count: 850 → '850', 57_400 → '57k', 2_720_000 → '2.7M'."""
+    n = _int(n)
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M".replace(".0M", "M")
+    if n >= 1_000:
+        return f"{round(n / 1_000)}k"
+    return str(n)
+
+
 def _basename(p) -> str:
     """Last path segment, handling both POSIX (/) and Windows (\\) separators.
 
@@ -112,6 +122,25 @@ def compute_metrics(scan: dict) -> dict:
     bypass_pct = _pct(bypass_total, bash_total)
     native = bypass.get("native_tool_use") or {}
     native_total = sum(_int(native.get(t)) for t in ("Grep", "Glob", "Read"))
+
+    # Measured token waste (chars → tokens ≈ /4). "Saved the daimon way" =
+    # what the bypass output actually cost minus what the same lookups would
+    # have cost through Grep/Glob/Read (measured avg, conservative fallback).
+    bypass_out_tokens = _int(bypass.get("bypass_result_chars")) // 4
+    bypass_measured = _int(bypass.get("bypass_results_measured"))
+    native_out_tokens = _int(bypass.get("native_result_chars")) // 4
+    native_measured = _int(bypass.get("native_results_measured"))
+    if native_measured >= 10:
+        native_avg_tokens = native_out_tokens / native_measured
+    else:
+        native_avg_tokens = 300  # conservative default when unmeasured
+    bypass_native_est_tokens = round(bypass_measured * native_avg_tokens)
+    bypass_saved_tokens = max(0, bypass_out_tokens - bypass_native_est_tokens)
+    error_waste_tokens = _int(cs.get("bash_error_chars")) // 4
+    window_tokens = sum(
+        _int(p.get("tokens"))
+        for p in (scan.get("work_recap") or {}).get("top_projects") or []
+    )
 
     destructive = cs.get("destructive_cmds") or []
     risky_git = sum(_int(d.get("count")) for d in destructive if d.get("label") in RISKY_GIT_LABELS)
@@ -172,6 +201,12 @@ def compute_metrics(scan: dict) -> dict:
         "bash_error": bash_e,
         "bash_error_pct": bash_error_pct,
         "installed": sorted(installed),
+        "bypass_out_tokens": bypass_out_tokens,
+        "bypass_measured": bypass_measured,
+        "bypass_native_est_tokens": bypass_native_est_tokens,
+        "bypass_saved_tokens": bypass_saved_tokens,
+        "error_waste_tokens": error_waste_tokens,
+        "window_tokens": window_tokens,
         "recurring": recurring,
         "unsaved": unsaved,
         "unsaved_count": unsaved_count,
@@ -578,6 +613,7 @@ def build_history_snapshot(scan: dict, m: dict, scorecard: list[dict], archetype
         "risky_git_count": _int(m["risky_git"]),
         "claudemd_missing": _int(m["claudemd_missing"]),
         "unsaved_prompts": _int(m["unsaved_count"]),
+        "token_saved_estimate": _int(m.get("bypass_saved_tokens")) + _int(m.get("error_waste_tokens")),
     }
     return {
         "date": (scan.get("date") or ""),  # caller stamps today's date
@@ -593,6 +629,45 @@ def build_history_snapshot(scan: dict, m: dict, scorecard: list[dict], archetype
 # --------------------------------------------------------------------------
 # Markdown report skeleton (recommendations/gaps left as placeholders)
 # --------------------------------------------------------------------------
+def build_token_savings(m: dict) -> dict | None:
+    """The daimon-way comparison: measured waste vs what the same work would
+    have cost with the cheaper habit. All numbers measured from real tool
+    output sizes (tokens ≈ chars/4); estimates are labeled as such. Returns
+    None when nothing meaningful was measured — never a fabricated number."""
+    saved = _int(m.get("bypass_saved_tokens")) + _int(m.get("error_waste_tokens"))
+    if saved < 1000:
+        return None
+    bypass_saved = _int(m.get("bypass_saved_tokens"))
+    error_waste = _int(m.get("error_waste_tokens"))
+    window = _int(m.get("window_tokens"))
+    out = {
+        "estimated_saved_tokens": saved,
+        "bypass_measured_tokens": _int(m.get("bypass_out_tokens")),
+        "bypass_native_est_tokens": _int(m.get("bypass_native_est_tokens")),
+        "bypass_saved_tokens": bypass_saved,
+        "error_waste_tokens": error_waste,
+        "window_tokens": window,
+    }
+    pct = _pct(saved, window)
+    if pct is not None:
+        out["pct_of_window"] = pct
+    parts = []
+    if bypass_saved:
+        parts.append(
+            f"shell search/read output measured {_fmt_tokens(m.get('bypass_out_tokens'))} tokens "
+            f"vs ~{_fmt_tokens(m.get('bypass_native_est_tokens'))} if the same lookups used Grep/Glob/Read"
+        )
+    if error_waste:
+        another = "another " if parts else ""
+        parts.append(f"errored bash calls burned {another}{_fmt_tokens(error_waste)}")
+    pct_str = f" (~{pct}% of the {_fmt_tokens(window)} in this window)" if pct else ""
+    out["headline"] = (
+        f"Doing it the daimon way would have saved ~{_fmt_tokens(saved)} tokens{pct_str}: "
+        + "; ".join(parts) + "."
+    )
+    return out
+
+
 def build_token_tips(m: dict) -> list[dict]:
     """Token-cost tips, each gated on a real count and naming a cheaper path.
     Only genuine waste with a clear alternative — never count-free editorializing.
@@ -605,10 +680,14 @@ def build_token_tips(m: dict) -> list[dict]:
         calls = m["bypass_calls"] or {}
         top = ", ".join(f"{k}×{v}" for k, v in
                         sorted(calls.items(), key=lambda kv: -_int(kv[1]))[:3])
+        evidence = (f"{m['bypass_total']} of {m['bash_total']} bash calls were "
+                    f"shell search/read ({m['bypass_pct']}%)" + (f" — {top}" if top else ""))
+        if m.get("bypass_saved_tokens"):
+            evidence += (f"; measured {_fmt_tokens(m['bypass_out_tokens'])} tokens of output, "
+                         f"~{_fmt_tokens(m['bypass_saved_tokens'])} avoidable")
         tips.append({
             "title": "Search with the built-in tools",
-            "evidence": f"{m['bypass_total']} of {m['bash_total']} bash calls were "
-                        f"shell search/read ({m['bypass_pct']}%)" + (f" — {top}" if top else ""),
+            "evidence": evidence,
             "tip": "Shell grep/cat/find stream entire files into context; Grep/Glob/Read "
                    "return just the matches. Same answer, a fraction of the tokens.",
         })
@@ -637,10 +716,13 @@ def build_token_tips(m: dict) -> list[dict]:
 
     # A failed command still costs its output, then you pay again on the retry.
     if m["bash_error"] >= 40:
+        evidence = (f"{m['bash_error']} of {m['bash_ok'] + m['bash_error']} bash calls "
+                    f"errored ({m['bash_error_pct']}%)")
+        if m.get("error_waste_tokens"):
+            evidence += f" — {_fmt_tokens(m['error_waste_tokens'])} tokens of error output"
         tips.append({
             "title": "Cut the shell error rate",
-            "evidence": f"{m['bash_error']} of {m['bash_ok'] + m['bash_error']} bash calls "
-                        f"errored ({m['bash_error_pct']}%)",
+            "evidence": evidence,
             "tip": "Every error lands its output in context, then the retry costs it again. "
                    "Check the path/flags (ls, --help) before running.",
         })
@@ -650,7 +732,7 @@ def build_token_tips(m: dict) -> list[dict]:
 
 def build_markdown(scan: dict, m: dict, verdict: dict, archetype: dict,
                    primary: dict, scorecard: list[dict], coaching: list[dict],
-                   token_tips: list[dict]) -> str:
+                   token_tips: list[dict], token_savings: dict | None = None) -> str:
     days = _int(scan.get("max_age_days")) or 28
     recap = scan.get("work_recap") or {}
     mix = recap.get("mix") or {}
@@ -720,6 +802,8 @@ def build_markdown(scan: dict, m: dict, verdict: dict, archetype: dict,
 
     if token_tips:
         L.append("## 💸 Trim token usage\n")
+        if token_savings:
+            L.append(f"**{token_savings['headline']}**\n")
         L.append("Cheaper habits that keep context small — each tied to a real count.\n")
         for t in token_tips:
             L.append(f"### {t['title']}")
@@ -750,9 +834,10 @@ def analyze(scan: dict) -> dict:
     archetype = pick_archetype(scan, m)
     coaching = build_coaching(m)
     token_tips = build_token_tips(m)
+    token_savings = build_token_savings(m)
     history_snapshot = build_history_snapshot(scan, m, scorecard, archetype)
     markdown = build_markdown(scan, m, verdict, archetype, primary, scorecard,
-                              coaching, token_tips)
+                              coaching, token_tips, token_savings)
 
     meta = {
         "days": _int(scan.get("max_age_days")) or 28,
@@ -776,6 +861,7 @@ def analyze(scan: dict) -> dict:
         "gaps": [],
         "coaching": coaching_for_render(coaching),
         "token_tips": token_tips,
+        "token_savings": token_savings,
         "scorecard": scorecard,
         "work_recap": scan.get("work_recap") or {},
         "charts": {
