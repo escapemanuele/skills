@@ -132,10 +132,9 @@ def compute_metrics(scan: dict) -> dict:
 
     installed = set(scan.get("installed_skills") or [])
     recurring = scan.get("recurring_prompts") or []
-    # "Unsaved" = a high-count repeated prompt with no prompt-to-command skill.
+    # "Unsaved" = a high-count repeated prompt with no matching saved command.
     unsaved = [r for r in recurring if _int(r.get("count")) >= 3]
-    prompt_cmd_installed = "prompt-to-command" in installed
-    unsaved_count = 0 if prompt_cmd_installed else len(unsaved)
+    unsaved_count = len(unsaved)
 
     stuck = scan.get("stuck_loops") or []
 
@@ -173,7 +172,6 @@ def compute_metrics(scan: dict) -> dict:
         "bash_error": bash_e,
         "bash_error_pct": bash_error_pct,
         "installed": sorted(installed),
-        "prompt_cmd_installed": prompt_cmd_installed,
         "recurring": recurring,
         "unsaved": unsaved,
         "unsaved_count": unsaved_count,
@@ -203,7 +201,7 @@ def pick_verdict(m: dict) -> dict:
             name = "Watch the shell"
             summary = "Several risky git commands in the window — worth a safer default."
             chips = [f"{m['risky_git']} risky git cmds in {m['session_count']} sessions"]
-    elif m["unsaved_count"] and not m["prompt_cmd_installed"]:
+    elif m["unsaved_count"]:
         top = max(m["unsaved"], key=lambda r: _int(r.get("count")))
         name = "Command-ready"
         summary = "A prompt is repeated often with no saved /command — prime to automate."
@@ -236,7 +234,6 @@ def pick_verdict(m: dict) -> dict:
 # Primary action (pick exactly ONE; highest hit wins)
 # --------------------------------------------------------------------------
 def pick_primary_action(m: dict) -> dict:
-    inst = "(installed)" if m["prompt_cmd_installed"] else "npx skills add escapemanuele/skills, then "
     lk_inst = "learnings-keeper" in m["installed"]
 
     if m["stuck_loops"]:
@@ -256,12 +253,12 @@ def pick_primary_action(m: dict) -> dict:
         }
     if m["unsaved_count"]:
         top = max(m["unsaved"], key=lambda r: _int(r.get("count")))
-        say = "turn my prompt into a /command"
+        say = "save my repeated prompt as a slash command"
         return {
             "title": "Save your repeated prompt as a /command",
-            "phrase": say if m["prompt_cmd_installed"] else f"({inst}) {say}",
+            "phrase": say,
             "why": f"A prompt was repeated ×{_int(top.get('count'))} with no saved /command.",
-            "source": "prompt-to-command (sibling skill)",
+            "source": "Behavior recommendation — no install needed",
         }
     if m["memory_rate_pct"] is not None and m["memory_rate_pct"] < 10:
         say = "save what we learned"
@@ -341,7 +338,7 @@ def build_scorecard(m: dict) -> list[dict]:
             "value": f"{m['unsaved_count']} prompts",
             "verdict": "watch",
             "note": "repeated ≥3× with no matching saved command",
-            "explain": "Say 'turn my <task> prompt into a /command' to save it with the prompt-to-command skill.",
+            "explain": "Say 'save my <task> prompt as a slash command' — Claude Code writes the command file natively.",
             "history_key": "unsaved_prompts",
             "current_number": m["unsaved_count"],
         })
@@ -466,14 +463,13 @@ def build_coaching(m: dict) -> list[dict]:
     if m["unsaved_count"]:
         top = max(m["unsaved"], key=lambda r: _int(r.get("count")))
         n = _int(top.get("count"))
-        prefix = "" if m["prompt_cmd_installed"] else "Install once with `npx skills add escapemanuele/skills`, then "
         cards.append({
             "title": "A repeated prompt has no saved command",
             "hard_count": f"a prompt repeated ×{n} across sessions",
             "saw": "The same instruction is retyped across sessions with no saved /command.",
             "matters": "Retyping is slower and the wording drifts run to run.",
-            "better": f'{prefix}say "turn my <task> prompt into a /command".',
-            "handoff": "prompt-to-command",
+            "better": 'Say "save my <task> prompt as a slash command" — no install needed.',
+            "handoff": _NO_INSTALL,
         })
 
     # Native-tool bypass (≥10% AND ≥30 calls)

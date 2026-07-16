@@ -77,6 +77,16 @@ set). Map the user's `--compact|--normal|--full` flag to scan's `--budget`
 (The old single-step scripts — `scan.py`, `analyze.py`, `render_report.py`,
 `history.py` — still work standalone for debugging; see `references/pipeline.md`.)
 
+## Dismissing a recommendation
+
+When the user asks to stop seeing a specific recommendation:
+
+```bash
+python3 ${CLAUDE_SKILL_DIR}/bin/scan.py --ignore <name>   # reverse: --unignore; list: --list-ignored
+```
+
+Never hand-edit the ignored JSON file.
+
 ## References (read only when needed)
 
 - `${CLAUDE_SKILL_DIR}/references/charter.md` — promise, tone, banned phrases, non-negotiables, failure modes.

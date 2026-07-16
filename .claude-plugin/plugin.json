@@ -1,8 +1,7 @@
 {
   "name": "skills-daimon",
   "skills": [
-    "./skills-daimon",
-    "./prompt-to-command",
-    "./learnings-keeper"
+    "./daimon/skills-daimon",
+    "./daimon/learnings-keeper"
   ]
 }

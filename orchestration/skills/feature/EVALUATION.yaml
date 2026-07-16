@@ -1,0 +1,100 @@
+version: 1
+scenarios:
+  - id: simple_feature_happy_path
+    user_message: |
+      /feature Add a --json flag to the export command so results can be printed as JSON instead of a table.
+    must_include:
+      - 'Agent: .*code.?explorer'
+      - 'Agent: .*implementer'
+      - 'Agent: .*test.?runner'
+      - 'Agent: .*reviewer'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+      - 'NotebookEdit:'
+    rubric:
+      - 'The plan starts by announcing the escapemanuele orchestration line before any other work.'
+      - 'Exploration via the code-explorer agent happens before any implementation step.'
+      - 'The plan states an explicit implementation boundary (specific files or functions) before delegating to the implementer.'
+      - 'The lead never edits files itself; all file changes are delegated to the implementer agent.'
+      - 'Verification (test-runner) runs after implementation and before the reviewer or final summary.'
+      - 'The plan ends with a user-facing summary covering implemented changes, changed files, verification, review result, and remaining risks.'
+
+  - id: cross_area_parallel_explorers
+    user_message: |
+      /feature Add an "archive project" feature: a new API endpoint to archive a project plus a button in the settings UI that calls it.
+    must_include:
+      - 'Agent: .*code.?explorer'
+      - 'Agent: .*implementer'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'The plan launches more than one code-explorer agent, each with a focused question for a distinct area (API vs UI), running in parallel.'
+      - 'The lead synthesizes the explorer findings itself rather than having explorers delegate to other agents.'
+      - 'The topology is a star: every subagent reports back to the lead, and no subagent delegates to another subagent.'
+
+  - id: lead_never_edits_anti_regression
+    user_message: |
+      /feature Rename the "displayName" field to "label" in the settings form. It's a tiny one-line change.
+    must_include:
+      - 'Agent: .*implementer'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+      - 'NotebookEdit:'
+    rubric:
+      - 'Even for a tiny change, the plan delegates the file change to the implementer agent — the lead does not edit files in this workflow.'
+      - 'The plan scales down: it uses a narrow boundary and targeted verification rather than a full broad test suite for a tiny rename.'
+
+  - id: overlapping_areas_sequential_implementers
+    user_message: |
+      /feature Add audit logging to both the user-update and user-delete flows. Both flows go through the same shared service module.
+    must_include:
+      - 'Agent: .*code.?explorer'
+      - 'Agent: .*implementer'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'Because the two flows share a module, the plan runs a single implementer or runs implementers sequentially — it never has two agents editing the same file concurrently.'
+      - 'The implementer prompt includes the approved plan, the exact boundary, and summarized explorer findings rather than raw pasted reports.'
+
+  - id: review_findings_fix_loop
+    user_message: |
+      /feature Add rate limiting to the login endpoint: max 5 attempts per minute per IP, returning HTTP 429 when exceeded.
+    must_include:
+      - 'Agent: .*reviewer'
+      - 'Agent: .*test.?runner'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'The plan includes a conditional fix loop: if the reviewer reports real actionable issues, the lead delegates the fix to the implementer with a tightened boundary and then re-runs targeted verification.'
+      - 'The plan has the lead assess which reviewer findings are real before any fix delegation, rather than forwarding every finding blindly.'
+      - 'Given this is security-adjacent, verification depth is scaled up (broader tests or typecheck) rather than minimal.'
+
+  - id: consequential_ambiguity_stops_to_ask
+    user_message: |
+      /feature Add an account deletion feature so users can delete their account from the settings page.
+    must_include:
+      - 'Agent: .*code.?explorer'
+    rubric:
+      - 'The plan recognizes a genuinely consequential product decision (e.g., hard delete vs soft delete / data retention) and stops to ask the user before implementing, rather than guessing.'
+      - 'The plan does not delegate to the implementer before the consequential ambiguity is resolved.'
+      - 'Exploration still proceeds first, since it is read-only and safe, and informs the question posed to the user.'
+
+  - id: routine_choices_no_permission_seeking
+    user_message: |
+      /feature Add a "copy to clipboard" button next to the API key shown on the developer settings page.
+    must_include:
+      - 'Agent: .*code.?explorer'
+      - 'Agent: .*implementer'
+      - 'Agent: .*reviewer'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'The plan proceeds end-to-end automatically without pausing to ask the user permission for routine low-risk choices (naming, icon, placement following existing conventions).'
+      - 'The plan avoids unrelated refactors and keeps changes narrowly scoped to the clipboard button.'
+      - 'If an explorer report seems suspect, the lead verifies the specific claim with a quick targeted Read instead of re-running the whole exploration.'

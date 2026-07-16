@@ -317,8 +317,6 @@ def _evidence_from_payload(p: dict) -> dict:
     # recurring prompts (top one without a saved skill counterpart)
     recurring = p.get("recurring_prompts") or []
     top_recurring = max((_safe_int(r.get("count")) for r in recurring), default=0)
-    installed = p.get("installed_skills") or []
-    has_prompt_to_command = "prompt-to-command" in installed
     saved_command_count = _nested_numeric(p, (
         ("command_events", "saved_from_repeated_prompt"),
         ("command_events", "commands_created_from_repeated_prompts"),
@@ -342,7 +340,6 @@ def _evidence_from_payload(p: dict) -> dict:
         "active_repos": active_repos,
         "active_repo_total": active_repo_total,
         "top_recurring": top_recurring,
-        "has_prompt_to_command_skill": bool(has_prompt_to_command),
         "saved_command_count": saved_command_count,
         "command_reuse_detected": command_reuse_detected,
         "labeled": labeled,

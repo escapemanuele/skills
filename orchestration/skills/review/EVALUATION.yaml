@@ -1,0 +1,119 @@
+version: 1
+scenarios:
+  - id: dirty_tree_dual_pass_review
+    user_message: |
+      I just finished some changes in my working tree. Run /review on them.
+    must_include:
+      - 'Bash: .*git (status|diff)'
+      - 'Agent: .*reviewer'
+      - 'Agent: .*codex'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+      - 'NotebookEdit:'
+    rubric:
+      - 'The plan starts by announcing the escapemanuele orchestration line before any review work.'
+      - 'The plan inspects the diff scope cheaply first (git status and git diff --stat) before launching any review agents.'
+      - 'The Claude reviewer pass and the Codex adversarial pass are launched in parallel in a single step, so neither sees the other''s findings.'
+      - 'The Codex pass is instructed to require file:line references, concrete failure scenarios, severities, and not to invent findings.'
+      - 'The plan ends with the lead synthesizing and deduplicating findings across both passes, ordered by severity, tagging findings reported by both model families as high-confidence.'
+
+  - id: focus_argument_passed_through
+    user_message: |
+      /review focus on auth and security
+    must_include:
+      - 'Bash: .*git (status|diff)'
+      - 'Agent: .*(auth|security)'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'The user''s focus on auth and security is passed along to the Claude reviewer agent, not silently dropped.'
+      - 'Both a Claude reviewer pass and a Codex adversarial pass are planned on the same diff scope.'
+      - 'The plan tells the review agents exactly which diff to inspect (unstaged, staged, or branch range).'
+
+  - id: clean_tree_falls_back_to_branch_diff
+    user_message: |
+      /review — I already committed everything on this branch, working tree is clean.
+    must_include:
+      - 'Bash: .*git diff.*main'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'Because the working tree is clean, the plan diffs against the default branch (git diff main...HEAD) instead of reviewing an empty working-tree diff.'
+      - 'Review agents are told to inspect the branch range, matching the diff scope actually found.'
+
+  - id: nothing_to_review_stops
+    user_message: |
+      /review
+      (Assume git status shows a clean working tree and git diff main...HEAD produces no output.)
+    must_include:
+      - 'Bash: .*git (status|diff)'
+    must_not_include:
+      - 'Agent: .*(reviewer|codex)'
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'After confirming both the working tree and the branch diff are empty, the plan says there is nothing to review and stops.'
+      - 'No review agents are launched when there is no diff to review.'
+      - 'The plan does not manufacture findings or pad the empty result.'
+
+  - id: large_diff_splits_claude_lenses
+    user_message: |
+      /review — this branch touches 40 files including an auth refactor and a data migration, so please be thorough.
+    must_include:
+      - 'Agent: .*correctness'
+      - 'Agent: .*security'
+      - 'Agent: .*(test|regression)'
+      - 'Agent: .*codex'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'Because the diff is large and touches security-sensitive areas and a data migration, the Claude side is split into separate parallel reviewer passes with distinct lenses: correctness, security, and tests/regressions.'
+      - 'The focused Claude passes and the Codex pass all target the same explicitly stated diff scope.'
+      - 'The synthesis step deduplicates across all passes and resolves disagreements by the lead reading the code itself.'
+
+  - id: codex_unavailable_continues_claude_only
+    user_message: |
+      /review my staged changes. Note: the Codex CLI is not installed on this machine, so the codex agent type will fail.
+    must_include:
+      - 'Agent: .*reviewer'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'The plan proceeds with the Claude reviewer pass alone rather than blocking the review on the unavailable Codex agent.'
+      - 'The final verdict explicitly notes that the cross-family Codex check was unavailable (e.g., "Codex unavailable — Claude-only review").'
+      - 'The reviewer is directed at the staged diff specifically.'
+
+  - id: never_edits_even_when_asked_to_fix
+    user_message: |
+      /review and go ahead and fix anything you find while you're at it.
+    must_include:
+      - 'Agent: .*(reviewer|review)'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+      - 'Agent: .*implement'
+      - 'Bash: .*git (commit|checkout|restore|stash|reset)'
+    rubric:
+      - 'The plan reviews only and does not edit, commit, or otherwise modify any files, even though the user asked for fixes.'
+      - 'The plan tells the user that fixing is a separate decision they can follow up on (e.g., via /feature, /bug, or a direct request).'
+      - 'Findings are still reported ordered by severity with file:line references and concrete failure scenarios.'
+
+  - id: small_diff_no_inflated_machinery
+    user_message: |
+      /review — I only changed one small function in a single file.
+    must_include:
+      - 'Bash: .*git (status|diff)'
+      - 'Agent: .*reviewer'
+      - 'Agent: .*codex'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'For this small diff the plan uses exactly one Claude reviewer pass plus one Codex pass, without splitting into multiple focused lens passes.'
+      - 'If neither pass finds anything significant, the plan reports "No significant issues found" plainly without manufactured nits.'
+      - 'The final response includes one line on cross-model agreement.'

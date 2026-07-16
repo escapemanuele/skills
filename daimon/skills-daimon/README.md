@@ -43,7 +43,7 @@ Or manually:
 
 ```bash
 git clone https://github.com/escapemanuele/skills.git /tmp/eb-skills
-cp -r /tmp/eb-skills/skills-daimon ~/.claude/skills/skills-daimon
+cp -r /tmp/eb-skills/daimon/skills-daimon ~/.claude/skills/skills-daimon
 ```
 
 Then run it:
@@ -60,7 +60,7 @@ skills-daimon also reads OpenAI Codex sessions (`~/.codex/sessions`). Install it
 
 ```bash
 git clone https://github.com/escapemanuele/skills.git /tmp/eb-skills
-cd /tmp/eb-skills/skills-daimon && ./install-codex.sh
+cd /tmp/eb-skills/daimon/skills-daimon && ./install-codex.sh
 ```
 
 This copies the scripts into `~/.codex/skills/skills-daimon/` with a Codex-native `SKILL.md`. Then run `skills-daimon` in Codex, or directly:
@@ -78,10 +78,9 @@ query.
 
 ## The plugin loop
 
-This folder is the heart of the `skills-daimon` plugin (`.claude-plugin/plugin.json`), which ships three skills that work as a loop — the report finds the problem, the siblings fix it:
+This folder is the heart of the `skills-daimon` plugin (`.claude-plugin/plugin.json`), which ships two skills that work as a loop — the report finds the problem, the sibling fixes it:
 
 - **skills-daimon** (this folder): the report itself — recap, recommendations, workflow signals, coaching, archetype, and the Daimon Grove.
-- **[prompt-to-command](../prompt-to-command/)**: turn a prompt you keep retyping into a saved slash command. skills-daimon *finds* the repeated prompt; this one *fixes* it.
 - **[learnings-keeper](../learnings-keeper/)**: save what you figured out in a session, then surface it again when a similar problem comes back. skills-daimon *flags* low memory usage; this one *captures and resurfaces* the lesson.
 
 ## Layout

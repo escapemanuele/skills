@@ -1,0 +1,100 @@
+version: 1
+scenarios:
+  - id: reproduce_and_investigate_before_fix
+    user_message: |
+      /bug Saving a draft post silently loses the tags field. Expected the tags
+      to persist after save; started happening sometime this week.
+    must_include:
+      - 'Agent: .*code-explorer'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'The plan starts by announcing the escapemanuele orchestration line before any other action.'
+      - 'The plan attempts to reproduce the bug (via an existing test, command, or minimal input) before any fix is proposed.'
+      - 'Investigation is delegated to the code-explorer subagent with a focused question, rather than the lead doing broad searches itself.'
+      - 'The plan states or commits to stating a root cause before any implementation step.'
+      - 'No file edits happen before the root cause is established.'
+
+  - id: difficult_bug_two_parallel_explorers
+    user_message: |
+      /bug Intermittent data corruption: about 1 in 20 checkout sessions ends
+      up with a negative cart total. No one has been able to pin it down; it
+      only shows under concurrent requests.
+    must_include:
+      - 'Agent: .*code-explorer'
+    must_not_include:
+      - 'Edit:'
+      - 'Write: .*(src|lib|app)/'
+    rubric:
+      - 'The plan runs two independent code-explorer investigation passes in parallel with different investigative goals (e.g. one tracing runtime/data flow of the failing path, one inspecting tests, recent changes, and edge cases).'
+      - 'The lead does not edit source files itself; any code fix is delegated to the implementer.'
+      - 'The two exploration passes are kept independent — one explorer''s hypothesis is not fed into the other''s prompt.'
+      - 'The lead synthesizes the evidence centrally and weighs contradictions before stating a root cause.'
+
+  - id: fix_delegated_to_implementer_then_verified
+    user_message: |
+      /bug The date formatter throws "Invalid time value" for null timestamps
+      on the activity feed. I can reproduce it every time by opening the feed
+      for a user with no activity.
+    must_include:
+      - 'Agent: .*implementer'
+      - 'Agent: .*test-runner'
+      - 'Agent: .*reviewer'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'The fix is delegated to the implementer subagent with a root cause statement, the exact fix, and an explicit boundary — the lead does not edit files directly.'
+      - 'The implementer is asked to add or adjust a test that fails without the fix, when feasible.'
+      - 'Verification via the test-runner subagent confirms the original reproduction now passes and nearby tests still pass.'
+      - 'The reviewer subagent is run on the diff after implementation, focused on regressions and edge cases around the fix.'
+      - 'The chosen fix is the smallest change addressing the root cause, not a rewrite of the surrounding code.'
+
+  - id: unclear_root_cause_iterate_not_patch
+    user_message: |
+      /bug Users say the app "sometimes feels broken" after login. No error
+      logs, no reproduction steps, nobody knows when it started.
+    must_include:
+      - 'Agent: .*code-explorer'
+    must_not_include:
+      - 'Agent: .*implementer'
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'The plan explicitly notes that no reliable reproduction is available yet and treats finding one as a priority.'
+      - 'The plan iterates on investigation instead of applying any fix, because the evidence does not yet support a root cause.'
+      - 'If a root cause cannot be established, the plan ends in an honest report of what is known and unknown rather than a symptom patch.'
+
+  - id: refuse_speculative_rewrite
+    user_message: |
+      /bug Pagination on the admin list skips the last page. While you're in
+      there, the whole pagination module is a mess — feel free to rewrite it
+      properly.
+    must_include:
+      - 'Agent: .*code-explorer'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'The plan limits the change to the smallest fix for the skipped-last-page root cause and declines the module rewrite as out of scope for this workflow.'
+      - 'Any implementer delegation is bounded to the pagination bug fix only, with an explicit boundary, not a rewrite mandate.'
+      - 'The plan still follows the full workflow: reproduce, investigate read-only, state root cause, then fix.'
+
+  - id: review_findings_fixed_and_reverified
+    user_message: |
+      /bug Fix the off-by-one in the retry backoff calculation — retries fire
+      one attempt too many. There's a failing unit test for it already:
+      the retry suite covers this case.
+    must_include:
+      - 'Agent: .*implementer'
+      - 'Agent: .*test-runner'
+      - 'Agent: .*reviewer'
+    must_not_include:
+      - 'Edit:'
+      - 'Write:'
+    rubric:
+      - 'The plan uses the existing failing unit test as the reproduction and confirms it passes after the fix.'
+      - 'The plan includes a conditional follow-up: if the reviewer reports findings the lead judges real, they are fixed via another implementer delegation and relevant verification is re-run — the plan does not presume the reviewer will approve.'
+      - 'The plan never schedules concurrent implementer edits to the same files or code area.'
+      - 'The final response is structured with root cause, fix, changed files, verification, review result, and remaining uncertainty.'

@@ -54,7 +54,7 @@ Say:
 
 **Why:** <one or two sentences citing the hard count that triggered this>
 
-**Source:** <`prompt-to-command` (sibling skill) | `learnings-keeper` (sibling skill) | catalog-backed skill name | Behavior recommendation · no install needed>
+**Source:** <`learnings-keeper` (sibling skill) | catalog-backed skill name | Behavior recommendation · no install needed>
 
 ---
 
@@ -113,7 +113,7 @@ How you're working, scored only where there's a clear better way. Each row = �
 **What we saw:** <one sentence>
 **Why it matters:** <one sentence>
 **Try this:** <one concrete behavior or command>
-**Handoff:** <`prompt-to-command` / `learnings-keeper` / "No install needed.">
+**Handoff:** <`learnings-keeper` / "No install needed.">
 
 (Up to 3 cards. Cap at 3.)
 

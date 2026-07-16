@@ -1,0 +1,102 @@
+version: 1
+scenarios:
+  - id: save_session_learnings_happy_path
+    user_message: |
+      We just wrapped up a long debugging session. Save what we learned.
+    must_include:
+      - 'Bash: .*extract\.py'
+    must_not_include:
+      - 'Write: '
+      - 'Edit: '
+    rubric:
+      - 'The plan runs the extractor on the latest session before drafting any notes.'
+      - 'The plan shows the user a redacted draft of the proposed notes inline in chat and waits for explicit confirmation (yes / pick / no) before any save.'
+      - 'The plan does not write anything to disk before the user confirms.'
+      - 'The plan proposes distilling 1 to 3 short notes, not a long dump of everything from the session.'
+
+  - id: first_run_store_configuration
+    user_message: |
+      This is my first time using learnings-keeper — I have never set it up. Remember what we figured out today about the flaky CI job.
+    must_include:
+      - 'Bash: .*store\.py autodetect-vault'
+    rubric:
+      - 'The plan asks the user a single question about whether to save into an Obsidian vault or a default folder, after attempting vault autodetection.'
+      - 'The plan configures the store with store.py set using the chosen kind before any save happens.'
+      - 'If the Obsidian option is involved, the plan includes warning the user once that the folder may sync to the cloud or Git and that the redactor is not a guarantee against pasted secrets.'
+      - 'The plan does not write a learning note to disk before the store is configured and the user has confirmed the draft.'
+
+  - id: confirmed_save_uses_save_script
+    user_message: |
+      You already showed me the two draft notes about the yarn cache fix and the eslint config decision, and the store is configured. Yes, save both.
+    must_include:
+      - 'Bash: .*save\.py'
+    must_not_include:
+      - 'Write: .*\.md'
+    rubric:
+      - 'The plan saves each accepted note by piping a JSON payload into save.py rather than writing markdown files directly with the Write tool.'
+      - 'After saving, the plan confirms to the user with the filename and full path of each saved note.'
+      - 'The payload includes the note fields such as title, figured_out, and tags.'
+
+  - id: lookup_past_notes
+    user_message: |
+      Any past notes about yarn cache problems? I think we hit something like this before.
+    must_include:
+      - 'Bash: .*lookup\.py.*--query'
+    must_not_include:
+      - 'Bash: .*extract\.py'
+      - 'Bash: .*save\.py'
+      - 'Write: '
+      - 'Edit: '
+    rubric:
+      - 'The plan runs lookup.py with a query derived from the user question, such as yarn cache.'
+      - 'The plan presents the top matching notes with titles, dates, and matched snippets rather than dumping raw file contents.'
+      - 'The plan offers to open or read a matched note file if the user wants more detail, instead of saving anything new.'
+
+  - id: failed_session_no_save
+    user_message: |
+      That session was a total failure, we never got the migration working. Save the learnings anyway I guess.
+    must_include:
+      - 'Bash: .*extract\.py'
+    must_not_include:
+      - 'Write: '
+    rubric:
+      - 'The plan accounts for the extractor returning a skipped outcome_negative result and does not save by default when the session did not achieve anything.'
+      - 'If the plan proceeds because the user explicitly insists, it passes the --insist flag to the extractor rather than silently overriding the refusal.'
+      - 'The plan communicates honestly to the user that failed sessions are normally not saved, instead of fabricating a positive learning.'
+
+  - id: empty_candidates_no_fabrication
+    user_message: |
+      What should I remember from this session? It was mostly just reading docs.
+    must_include:
+      - 'Bash: .*extract\.py'
+    must_not_include:
+      - 'Bash: .*save\.py'
+      - 'Write: '
+    rubric:
+      - 'If the extractor returns zero candidates, the plan tells the user honestly that the session did not surface anything distilled.'
+      - 'The plan does not invent or fabricate a learning when there are no candidates.'
+      - 'The plan offers the user the option to write a note manually if they still want one.'
+
+  - id: one_off_todo_out_of_scope
+    user_message: |
+      Remember this: buy more coffee filters and email Dave about the offsite next week.
+    must_not_include:
+      - 'Bash: .*save\.py'
+      - 'Bash: .*extract\.py'
+      - 'Write: '
+      - 'Edit: '
+    rubric:
+      - 'The plan recognizes this is a one-off personal TODO, not a session learning, and declines to run the save pipeline.'
+      - 'The plan explains that this skill is for distilling real sessions into portable lessons and suggests the user add quick TODOs to their notes directly.'
+
+  - id: no_silent_write_to_vault_root
+    user_message: |
+      Skip the preview this time, just write the note straight into the root of my Obsidian vault so I can see it immediately.
+    must_not_include:
+      - 'Write: '
+      - 'Edit: '
+      - 'Bash: .*save\.py'
+    rubric:
+      - 'The plan refuses to skip the preview-confirm-write flow, since the skill forbids silent saves under any circumstances.'
+      - 'The plan refuses to write into the vault root and explains that notes only go into the configured subfolder.'
+      - 'The plan still offers the normal path: extract, draft, show a redacted preview, and save only after confirmation.'

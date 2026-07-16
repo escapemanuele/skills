@@ -1,11 +1,13 @@
 # Claude Code skills & agents
 
-1. **skills daimon**: Reads your past sessions and shows you what to do to improve your AI usage.
-2. **A small AI team for coding work.** Instead of one AI doing everything in one go, you get a team with clear jobs: one plans, one reads the code, one writes the change, one runs the tests, one double-checks everything. You drive it with three commands: `/feature`, `/bug`, `/review`.
+Two products live here:
 
-## Part 1: the three skills
+1. **[daimon](daimon/)**: reads your past sessions and shows you what to do to improve your AI usage — plus a companion skill that saves what you learn so it compounds.
+2. **[orchestration](orchestration/)**: a small AI team for coding work. Instead of one AI doing everything in one go, you get a team with clear jobs: one plans, one reads the code, one writes the change, one runs the tests, one double-checks everything. You drive it with three commands: `/feature`, `/bug`, `/review`.
 
-### [skills-daimon](skills-daimon/) — "how am I actually using this thing?"
+## Part 1: the daimon loop ([daimon](daimon/))
+
+### [skills-daimon](daimon/skills-daimon/) — "how am I actually using this thing?"
 
 Reads your recent Claude Code sessions (all on your own computer — nothing is uploaded anywhere) and writes you a personal report:
 
@@ -16,13 +18,11 @@ Reads your recent Claude Code sessions (all on your own computer — nothing is 
 
 Run it with `/skills-daimon`. Also works if you use OpenAI's Codex instead of Claude Code.
 
-### [prompt-to-command](prompt-to-command/) — "stop retyping the same prompt"
-
-You know that paragraph you paste into Claude every morning? This turns it into a short command. Next time you just type `/journal evening` instead of pasting the whole thing. It asks before saving anything, and it never puts passwords or keys inside the saved file.
-
-### [learnings-keeper](learnings-keeper/) — "remember what we figured out"
+### [learnings-keeper](daimon/learnings-keeper/) — "remember what we figured out"
 
 At the end of a session where you cracked something — a bug, a decision, a gotcha — this saves a short note about it (into your Obsidian vault if you have one, or a plain folder if you don't). Weeks later, when the same problem shows up again, it finds that note and brings it back. Nothing is saved without showing you the note first.
+
+The two work as a loop: skills-daimon *diagnoses* (you don't save what you learn); learnings-keeper *treats it* — and daimon's coaching resurfaces old notes when a similar friction comes back.
 
 ## Part 2: the AI team ([orchestration](orchestration/))
 
@@ -47,7 +47,7 @@ Each helper's job never changes, but the AI model doing that job can be swapped 
 
 ## Install
 
-**The three skills**, via [skills.sh](https://www.skills.sh):
+**The daimon skills**, via [skills.sh](https://www.skills.sh):
 
 ```bash
 npx skills@latest add escapemanuele/skills
@@ -57,7 +57,8 @@ Or by hand:
 
 ```bash
 git clone https://github.com/escapemanuele/skills.git /tmp/eb-skills
-cp -r /tmp/eb-skills/skills-daimon ~/.claude/skills/skills-daimon
+cp -r /tmp/eb-skills/daimon/skills-daimon ~/.claude/skills/skills-daimon
+cp -r /tmp/eb-skills/daimon/learnings-keeper ~/.claude/skills/learnings-keeper
 ```
 
 Then type `/skills-daimon` in Claude Code.
@@ -71,12 +72,19 @@ git clone https://github.com/escapemanuele/skills.git
 
 Then use `/feature`, `/bug`, `/review` in any repo on your machine.
 
+## Evals
+
+Skill behavior is pinned with [unvibe](https://github.com/aaronfc/unvibe) — tiny pseudo-evals that poke each skill with scenario prompts and assert which tools Claude plans to call. Every skill folder carries an `EVALUATION.yaml`. Run one:
+
+```bash
+uvx --from git+https://github.com/aaronfc/unvibe.git unvibe daimon/skills-daimon
+```
+
 ## Want the details?
 
 Each folder has its own README that goes deeper — how it works inside, what it writes to disk, and the design decisions:
-[skills-daimon](skills-daimon/README.md) ·
-[prompt-to-command](prompt-to-command/README.md) ·
-[learnings-keeper](learnings-keeper/README.md) ·
+[skills-daimon](daimon/skills-daimon/README.md) ·
+[learnings-keeper](daimon/learnings-keeper/README.md) ·
 [orchestration](orchestration/README.md)
 
 ## License

@@ -62,7 +62,7 @@ SAMPLE_PAYLOAD = {
             {"path": "/x/Dragon Lodge", "kind": "writing", "sessions": 78},
         ],
     },
-    "installed_skills": ["prompt-to-command"],
+    "installed_skills": ["learnings-keeper"],
     "stuck_loops": [],
 }
 
@@ -223,7 +223,7 @@ class TestQuestSelection(unittest.TestCase):
             },
             "recurring_prompts": [],
             "work_recap": {"top_projects": []},
-            "installed_skills": ["prompt-to-command"],
+            "installed_skills": ["learnings-keeper"],
             "stuck_loops": [],
         }
         s = build_game_state(clean, None, today="2026-05-25")
@@ -363,7 +363,7 @@ class TestConservativeBadges(unittest.TestCase):
             },
             "recurring_prompts": [],
             "work_recap": {"top_projects": [{"path": "/x/repo", "kind": "dev", "sessions": 6}]},
-            "installed_skills": ["prompt-to-command"],
+            "installed_skills": ["learnings-keeper"],
             "stuck_loops": [],
         }
 

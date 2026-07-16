@@ -29,15 +29,15 @@ strongest pattern, 2–4 evidence chips, and exactly one *Next move*.
 
 1. Stuck-loop present → *"change the question, not the count"* (behavior advice; no install)
 2. Risky-git ≥ 4 → *"use `--force-with-lease` and `git revert` next time"* (behavior; no install)
-3. Repeated prompt unsaved → *"turn my prompt into a /command"* → **prompt-to-command**
+3. Repeated prompt unsaved → *"save this prompt as a slash command"* (behavior; no install — Claude Code writes slash commands natively)
 4. Memory rate < 10% with reusable lessons → *"save what we learned"* → **learnings-keeper**
 5. Coverage < 30% → *"run skills-daimon again in a few days; signals will sharpen"* (no install)
 6. Top recurring friction → matching behavior or sibling-skill action
 7. Native-tool bypass ≥ 25% → *"prefer the built-in search/read"* (behavior)
 
 The primary-action card carries: title · exact phrase to say · why (hard-count
-evidence) · source (`Behavior recommendation` / `prompt-to-command` /
-`learnings-keeper` / catalog-backed skill name) · one paragraph of why-it-matters.
+evidence) · source (`Behavior recommendation` / `learnings-keeper` /
+catalog-backed skill name) · one paragraph of why-it-matters.
 
 ## Scorecard thresholds (Workflow signals)
 
@@ -49,7 +49,7 @@ missing, prefer a `no_data` row with `value: "not enough data"` over omission.
 - **File search (shell vs built-in)** — from `coaching_signals.native_tool_bypass`. `value` = "<pct>% via shell", `note` = "<bypass_total> shell vs <Grep+Glob+Read> built-in". `<10%` → `good`, `10–25%` → `watch`, `>25%` → `needs_action`.
 - **Risky git** — count `git push --force` / `git reset --hard` / `--no-verify` from `destructive_cmds` (ignore `rm -rf`). `0` → `good` (show it), `1–3` → `watch`, `4+` → `needs_action`.
 - **Raw HTTP to a tool-backed host** — only for hosts in `raw_http_hosts` that actually have a CLI/MCP (you judge, e.g. `teamcity.a8c.com`). Any such host → `watch`. `value` = "<host> ×N".
-- **Recurring prompt not saved** — recurring prompts (count ≥ 3) with no matching `installed_skills`. Any → `watch`. `value` = "N prompts". In `explain`, name the fix: *"Say 'turn my <task> prompt into a /command' to save it with the `prompt-to-command` skill"* (prefix `npx skills add escapemanuele/skills` if not installed).
+- **Recurring prompt not saved** — recurring prompts (count ≥ 3) with no matching `installed_skills`. Any → `watch`. `value` = "N prompts". In `explain`, name the fix: *"Say 'save my <task> prompt as a slash command' — Claude Code writes the command file natively, no install needed."*
 - **Outcome — sessions finished** — from `outcomes.by_facet` + `outcomes.coverage`. `(fully_achieved + mostly_achieved) / labeled`. `≥85%` → `good`, `70–85%` → `watch`, `<70%` → `needs_action`. `value` = "<pct>% finished". `note` MUST include coverage: *"<labeled> of <total> sessions labeled"*. When `labeled` is 0 → `no_data`, `value: "not enough labeled sessions yet"`.
 - **Tool error rate (Bash)** — from `tool_errors.Bash`. Rate = `error / (ok + error)`. `<5%` → `good`, `5–15%` → `watch`, `≥15%` → `needs_action`. `value` = "<pct>% Bash errors", `note` = "<error> of <ok+error> calls".
 - **Memory usage rate** — `memory_events.sessions_with_memory / session_count`. `≥30%` → `good`, `10–30%` → `watch`, `<10%` → `needs_action`. In `explain`, name the fix: *"After a useful session, just say **'save what we learned'** — the `learnings-keeper` skill captures it"* (prefix `npx skills add escapemanuele/skills` if not installed).
@@ -71,7 +71,7 @@ habits. Same bar as recommendations: **every point cites a hard count**.
 
 Card shape: **Evidence (hard count) → What we saw → Why it matters → Try this →
 Handoff**. `Handoff` names the sibling skill that closes the loop
-(`prompt-to-command`, `learnings-keeper`) or *"No install needed — behavior change."*
+(`learnings-keeper`) or *"No install needed — behavior change."*
 
 Signals to build from (skip any under threshold):
 
@@ -82,9 +82,7 @@ Signals to build from (skip any under threshold):
 - **Sleep-polling** — `sleep_calls` ≥ 5 → suggest a proper wait/background job.
 
 **Missing patterns:**
-- **Recurring prompt with no saved command** — `recurring_prompts` (count ≥ 3) with no matching `installed_skills`. Fix is the sibling **prompt-to-command** skill:
-  - installed: *"Just say: **\"turn my <task> prompt into a /command\"** — the `prompt-to-command` skill will save it."*
-  - not installed: *"Install once with `npx skills add escapemanuele/skills`, then say \"turn my <task> prompt into a /command\"."*
+- **Recurring prompt with no saved command** — `recurring_prompts` (count ≥ 3) with no matching `installed_skills`. Fix is a behavior change, no install: *"Just say: **\"save my <task> prompt as a slash command\"** — Claude Code writes the `~/.claude/commands/<name>.md` file natively."*
   Usually the clearest single win — prefer it as one of the 3 when present.
 - **Hot repo without CLAUDE.md** — for each `hot_repos_without_claudemd` entry, suggest adding `CLAUDE.md`.
 - **Plan mode / subagents / memory** — only if a signal supports it. No generic listing.
