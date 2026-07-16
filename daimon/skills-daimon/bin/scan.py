@@ -642,6 +642,12 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
     proj_tokens = collections.Counter()        # project -> total tokens (in+out)
     proj_branch: dict[str, str] = {}           # project -> gitBranch
 
+    # --- model mix: per-family token volume + automation-on-premium signal ---
+    model_tokens: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    # (first_prompt_norm, premium_out_tokens, premium_cache_read) per session:
+    # sessions sharing an identical first prompt (≥3×) look automated.
+    session_records: list[tuple[str, int, int]] = []
+
     # --- work-recap signals ---
     work_mix = collections.Counter()           # global: dev/data/writing/ops
     proj_signal: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
@@ -735,6 +741,9 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
         tool_use_id_to_name: dict[str, str] = {}
         tool_use_id_bypass: set[str] = set()
         session_has_memory = False
+        session_first_prompt: str | None = None
+        session_premium_out = 0
+        session_premium_cache_read = 0
         # (timestamp ISO, command_string) per Bash use — for stuck-loop detection.
         session_bash_events: list[tuple[str, str]] = []
 
@@ -807,6 +816,8 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
                             normalized = normalize_prompt(text)
                             if normalized:
                                 prompt_counter[normalized] += 1
+                                if session_first_prompt is None:
+                                    session_first_prompt = normalized
                             # /remember invocation in user content
                             if text and MEMORY_REMEMBER_RE.search(text):
                                 memory_remember += 1
@@ -820,6 +831,19 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
                                 int(usage.get("input_tokens") or 0)
                                 + int(usage.get("output_tokens") or 0)
                             )
+                            mdl = (msg.get("model") or "").lower()
+                            fam = next((f for f in ("opus", "fable", "sonnet", "haiku")
+                                        if f in mdl), None)
+                            if fam:
+                                mt = model_tokens[fam]
+                                mt["calls"] += 1
+                                mt["in"] += int(usage.get("input_tokens") or 0)
+                                mt["out"] += int(usage.get("output_tokens") or 0)
+                                mt["cache_read"] += int(usage.get("cache_read_input_tokens") or 0)
+                                mt["cache_write"] += int(usage.get("cache_creation_input_tokens") or 0)
+                                if fam in ("opus", "fable"):
+                                    session_premium_out += int(usage.get("output_tokens") or 0)
+                                    session_premium_cache_read += int(usage.get("cache_read_input_tokens") or 0)
                         for tu in tool_uses_from_assistant(ev):
                             name = tu.get("name", "?")
                             tool_uses[name] += 1
@@ -943,6 +967,8 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
                 "bash_calls": session_bash,
             }
         )
+        session_records.append((session_first_prompt or "",
+                                session_premium_out, session_premium_cache_read))
 
     # Pick top repeated prompts (recurring >= budget's recurring_min)
     recurring = [
@@ -957,6 +983,24 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
         for p, n in list(prompt_counter.items())
         if n == 1
     ][:oneoff_count]
+
+    # --- Model mix + automation-on-premium (sessions sharing an identical
+    # first prompt ≥3× look automated; premium = opus/fable families) ---
+    fp_counts = collections.Counter(r[0] for r in session_records if r[0])
+    auto_sessions = auto_out = auto_cache = 0
+    for fp, pout, pcr in session_records:
+        if fp and fp_counts[fp] >= 3 and pout:
+            auto_sessions += 1
+            auto_out += pout
+            auto_cache += pcr
+    model_mix = {
+        "by_model": {f: dict(c) for f, c in model_tokens.items()},
+        "automated_premium": {
+            "sessions": auto_sessions,
+            "out_tokens": auto_out,
+            "cache_read_tokens": auto_cache,
+        },
+    }
 
     installed = discover_installed(cwd or Path.cwd())
 
@@ -1108,6 +1152,7 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
         "outcomes": outcomes,
         "completion": completion,
         "tool_errors": tool_errors,
+        "model_mix": model_mix,
         "memory_events": memory_events,
         "stuck_loops": stuck_loops,
     }

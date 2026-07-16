@@ -53,6 +53,7 @@ missing, prefer a `no_data` row with `value: "not enough data"` over omission.
 - **Outcome — sessions finished** — from `outcomes.by_facet` + `outcomes.coverage`. `(fully_achieved + mostly_achieved) / labeled`. `≥85%` → `good`, `70–85%` → `watch`, `<70%` → `needs_action`. `value` = "<pct>% finished". `note` MUST include coverage: *"<labeled> of <total> sessions labeled"*. When `labeled` is 0 → `no_data`, `value: "not enough labeled sessions yet"`.
 - **Tool error rate (Bash)** — from `tool_errors.Bash`. Rate = `error / (ok + error)`. `<5%` → `good`, `5–15%` → `watch`, `≥15%` → `needs_action`. `value` = "<pct>% Bash errors", `note` = "<error> of <ok+error> calls".
 - **Memory usage rate** — `memory_events.sessions_with_memory / session_count`. `≥30%` → `good`, `10–30%` → `watch`, `<10%` → `needs_action`. In `explain`, name the fix: *"After a useful session, just say **'save what we learned'** — the `learnings-keeper` skill captures it"* (prefix `npx skills add escapemanuele/skills` if not installed).
+- **Premium-model output share** — from `model_mix`. `value` = "<pct>% of output" (opus/fable over all families). Automation on premium (model waste ≥ $5) → `needs_action`; `≥90%` premium → `watch`; else `good`. `note` carries the token denominators.
 
 Each row carries a `note` (denominator) and an `explain` (1–2 plain sentences for
 the expand-on-click body). Optional `history_key` + `current_number` let the
@@ -118,8 +119,14 @@ tool-result sizes (tokens ≈ chars/4):
   native calls measured). Saved = measured − estimated, floored at 0. cat/head→Read
   is cost-neutral and never counted.
 - **Error waste**: output of errored Bash calls — pure context cost.
-- Headline renders only when the total ≥1000 tokens; percentages carry the window
-  token denominator. Never a fabricated number — no measurement, no banner.
+- **Model waste**: sessions whose identical first prompt repeats ≥3× (cron jobs,
+  pipelines, graders) that ran on a premium family (opus/fable). $ estimate =
+  API-list-price delta to Haiku on output + cache-read (`MODEL_PRICES`; Fable
+  priced at the Opus floor). Rendered only when ≥ $5, always labeled
+  "API-equivalent". Fix is pinning `--model` in the scheduled invocation.
+- Headline renders only when token savings ≥1000 or model waste ≥$5; percentages
+  carry the window token denominator. Never a fabricated number — no measurement,
+  no banner.
 
 ## Worth building yourself (gaps)
 

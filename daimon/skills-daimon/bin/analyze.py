@@ -74,6 +74,19 @@ def _pct(num: int, den: int) -> int | None:
     return round(100 * num / den)
 
 
+# API list prices $/M tokens (output, cache_read) — the two axes that dominate
+# session cost. Used only for the API-equivalent model-waste estimate; always
+# label the result "API-equivalent". Fable is unpublished → priced at the Opus
+# floor (conservative).
+MODEL_PRICES = {
+    "opus":   (75.0, 1.5),
+    "fable":  (75.0, 1.5),
+    "sonnet": (15.0, 0.3),
+    "haiku":  (5.0, 0.1),
+}
+PREMIUM_FAMILIES = ("opus", "fable")
+
+
 def _fmt_tokens(n: int) -> str:
     """Human token count: 850 → '850', 57_400 → '57k', 2_720_000 → '2.7M'."""
     n = _int(n)
@@ -142,6 +155,24 @@ def compute_metrics(scan: dict) -> dict:
         for p in (scan.get("work_recap") or {}).get("top_projects") or []
     )
 
+    # Model mix: share of output on premium families + automation-on-premium.
+    mm = scan.get("model_mix") or {}
+    by_model = mm.get("by_model") or {}
+    premium_out = sum(_int((by_model.get(f) or {}).get("out")) for f in PREMIUM_FAMILIES)
+    total_model_out = sum(_int(c.get("out")) for c in by_model.values())
+    premium_out_pct = _pct(premium_out, total_model_out)
+    ap = mm.get("automated_premium") or {}
+    auto_prem_sessions = _int(ap.get("sessions"))
+    auto_prem_out = _int(ap.get("out_tokens"))
+    auto_prem_cache = _int(ap.get("cache_read_tokens"))
+    # API-equivalent $ avoidable by pinning automated sessions to Haiku
+    # (delta on output + cache-read prices, the axes that dominate).
+    prem_out_price, prem_cr_price = MODEL_PRICES["opus"]
+    haiku_out_price, haiku_cr_price = MODEL_PRICES["haiku"]
+    model_saving_usd = round(
+        auto_prem_out / 1e6 * (prem_out_price - haiku_out_price)
+        + auto_prem_cache / 1e6 * (prem_cr_price - haiku_cr_price), 2)
+
     destructive = cs.get("destructive_cmds") or []
     risky_git = sum(_int(d.get("count")) for d in destructive if d.get("label") in RISKY_GIT_LABELS)
     sleep_calls = _int(cs.get("sleep_calls"))
@@ -207,6 +238,12 @@ def compute_metrics(scan: dict) -> dict:
         "bypass_saved_tokens": bypass_saved_tokens,
         "error_waste_tokens": error_waste_tokens,
         "window_tokens": window_tokens,
+        "premium_out_pct": premium_out_pct,
+        "premium_out": premium_out,
+        "total_model_out": total_model_out,
+        "auto_prem_sessions": auto_prem_sessions,
+        "auto_prem_out": auto_prem_out,
+        "model_saving_usd": model_saving_usd,
         "recurring": recurring,
         "unsaved": unsaved,
         "unsaved_count": unsaved_count,
@@ -421,7 +458,30 @@ def build_scorecard(m: dict) -> list[dict]:
             "history_key": "memory_rate_pct", "current_number": m["memory_rate_pct"],
         })
 
-    return rows[:6]
+    # Model mix — flag automation running on a premium model.
+    if m.get("premium_out_pct") is not None:
+        if m.get("model_saving_usd", 0) >= 5:
+            v = "needs_action"
+            explain = (f"{m['auto_prem_sessions']} automated-looking sessions ran on a premium model "
+                       f"(~${m['model_saving_usd']:,.0f} API-equivalent avoidable). Pin --model in the "
+                       "scheduled invocation; Haiku/Sonnet handle templated jobs fine.")
+        elif m["premium_out_pct"] >= 90:
+            v = "watch"
+            explain = ("Nearly all output runs on premium models. Fine for hard work — consider "
+                       "Sonnet for routine edits and Haiku for mechanical subagents.")
+        else:
+            v = "good"
+            explain = "Model choice looks deliberate — premium where it matters."
+        rows.append({
+            "label": "Premium-model output share",
+            "value": f"{m['premium_out_pct']}% of output",
+            "verdict": v,
+            "note": f"{m['premium_out']:,} of {m['total_model_out']:,} output tokens on opus/fable",
+            "explain": explain,
+            "history_key": "premium_out_pct", "current_number": m["premium_out_pct"],
+        })
+
+    return rows[:7]
 
 
 # --------------------------------------------------------------------------
@@ -504,6 +564,22 @@ def build_coaching(m: dict) -> list[dict]:
             "saw": "The same instruction is retyped across sessions with no saved /command.",
             "matters": "Retyping is slower and the wording drifts run to run.",
             "better": 'Say "save my <task> prompt as a slash command" — no install needed.',
+            "handoff": _NO_INSTALL,
+        })
+
+    # Automation running on a premium model (measured $ delta, floor $5)
+    if m.get("model_saving_usd", 0) >= 5:
+        cards.append({
+            "title": "Scheduled jobs are burning a premium model",
+            "hard_count": (f"{m['auto_prem_sessions']} automated-looking sessions, "
+                           f"{_fmt_tokens(m['auto_prem_out'])} output tokens on opus/fable "
+                           f"(~${m['model_saving_usd']:,.0f} API-equivalent avoidable)"),
+            "saw": "Sessions that start with an identical repeated prompt — cron jobs, "
+                   "pipelines, graders — ran on a top-tier model.",
+            "matters": "Templated jobs don't need frontier reasoning; they inherit the "
+                       "default model unless pinned, and eat your limits at premium weight.",
+            "better": 'Add --model (e.g. claude-haiku-4-5-20251001 or claude-sonnet-5) '
+                      'to the scheduled claude -p invocation.',
             "handoff": _NO_INSTALL,
         })
 
@@ -614,6 +690,7 @@ def build_history_snapshot(scan: dict, m: dict, scorecard: list[dict], archetype
         "claudemd_missing": _int(m["claudemd_missing"]),
         "unsaved_prompts": _int(m["unsaved_count"]),
         "token_saved_estimate": _int(m.get("bypass_saved_tokens")) + _int(m.get("error_waste_tokens")),
+        "premium_out_pct": _int(m.get("premium_out_pct")),
     }
     return {
         "date": (scan.get("date") or ""),  # caller stamps today's date
@@ -635,7 +712,8 @@ def build_token_savings(m: dict) -> dict | None:
     output sizes (tokens ≈ chars/4); estimates are labeled as such. Returns
     None when nothing meaningful was measured — never a fabricated number."""
     saved = _int(m.get("bypass_saved_tokens")) + _int(m.get("error_waste_tokens"))
-    if saved < 1000:
+    model_usd = float(m.get("model_saving_usd") or 0)
+    if saved < 1000 and model_usd < 5:
         return None
     bypass_saved = _int(m.get("bypass_saved_tokens"))
     error_waste = _int(m.get("error_waste_tokens"))
@@ -661,10 +739,24 @@ def build_token_savings(m: dict) -> dict | None:
         another = "another " if parts else ""
         parts.append(f"errored bash calls burned {another}{_fmt_tokens(error_waste)}")
     pct_str = f" (~{pct}% of the {_fmt_tokens(window)} in this window)" if pct else ""
-    out["headline"] = (
-        f"Doing it the daimon way would have saved ~{_fmt_tokens(saved)} tokens{pct_str}: "
-        + "; ".join(parts) + "."
-    )
+    if saved >= 1000:
+        out["headline"] = (
+            f"Doing it the daimon way would have saved ~{_fmt_tokens(saved)} tokens{pct_str}: "
+            + "; ".join(parts) + "."
+        )
+    else:
+        out["headline"] = ""
+    if model_usd >= 5:
+        out["model_saving_usd"] = model_usd
+        out["model_headline"] = (
+            f"{_int(m.get('auto_prem_sessions'))} automated-looking sessions ran on a premium "
+            f"model — ~${model_usd:,.0f} API-equivalent avoidable by pinning them to Haiku "
+            f"(--model in the scheduled invocation)."
+        )
+        if not out["headline"]:
+            out["headline"] = out["model_headline"]
+        else:
+            out["headline"] += " " + out["model_headline"]
     return out
 
 

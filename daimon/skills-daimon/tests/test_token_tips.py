@@ -189,6 +189,61 @@ class TestAnalyzeIntegration(unittest.TestCase):
         self.assertIn("Doing it the daimon way", out["markdown_report"])
 
 
+class TestModelMixMetrics(unittest.TestCase):
+    def _scan(self, **mm):
+        return {"session_count": 10, "model_mix": mm}
+
+    def test_premium_share_and_model_saving(self):
+        scan = self._scan(
+            by_model={
+                "opus": {"calls": 100, "in": 0, "out": 900_000, "cache_read": 0, "cache_write": 0},
+                "sonnet": {"calls": 10, "in": 0, "out": 100_000, "cache_read": 0, "cache_write": 0},
+            },
+            automated_premium={"sessions": 30, "out_tokens": 400_000,
+                               "cache_read_tokens": 10_000_000},
+        )
+        m = analyze.compute_metrics(scan)
+        self.assertEqual(m["premium_out_pct"], 90)
+        # 0.4M × $(75−5) + 10M × $(1.5−0.1) = $28 + $14 = $42
+        self.assertEqual(m["model_saving_usd"], 42.0)
+        self.assertEqual(m["auto_prem_sessions"], 30)
+
+    def test_no_model_mix_no_signal(self):
+        m = analyze.compute_metrics({"session_count": 10})
+        self.assertIsNone(m["premium_out_pct"])
+        self.assertEqual(m["model_saving_usd"], 0)
+
+    def test_savings_includes_model_headline(self):
+        m = {"bypass_saved_tokens": 0, "error_waste_tokens": 0,
+             "bypass_out_tokens": 0, "bypass_native_est_tokens": 0,
+             "window_tokens": 0, "model_saving_usd": 42.0,
+             "auto_prem_sessions": 30}
+        s = analyze.build_token_savings(m)
+        self.assertIsNotNone(s)
+        self.assertIn("$42", s["headline"])
+        self.assertIn("30 automated-looking sessions", s["headline"])
+
+    def test_scorecard_flags_automation_on_premium(self):
+        scan = self._scan(
+            by_model={"opus": {"out": 1_000_000}},
+            automated_premium={"sessions": 30, "out_tokens": 400_000,
+                               "cache_read_tokens": 10_000_000},
+        )
+        m = analyze.compute_metrics(scan)
+        rows = analyze.build_scorecard(m)
+        row = next(r for r in rows if r["label"] == "Premium-model output share")
+        self.assertEqual(row["verdict"], "needs_action")
+
+    def test_scorecard_watch_when_all_premium_no_automation(self):
+        scan = self._scan(by_model={"opus": {"out": 1_000_000}},
+                          automated_premium={"sessions": 0, "out_tokens": 0,
+                                             "cache_read_tokens": 0})
+        m = analyze.compute_metrics(scan)
+        rows = analyze.build_scorecard(m)
+        row = next(r for r in rows if r["label"] == "Premium-model output share")
+        self.assertEqual(row["verdict"], "watch")
+
+
 class TestSavingsBannerHtml(unittest.TestCase):
     def test_banner_rendered_when_present(self):
         html = rr.simple_token_block(
