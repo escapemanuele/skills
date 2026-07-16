@@ -647,6 +647,13 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
     # (first_prompt_norm, premium_out_tokens, premium_cache_read) per session:
     # sessions sharing an identical first prompt (≥3×) look automated.
     session_records: list[tuple[str, int, int]] = []
+    # Marathon premium sessions: one session whose premium-family cache reads
+    # exceed this — a whole repo's context riding a premium model all day.
+    MARATHON_CACHE_READ = 50_000_000
+    marathon_sessions = 0
+    marathon_cache = 0
+    marathon_out = 0
+    marathon_top = 0
 
     # --- work-recap signals ---
     work_mix = collections.Counter()           # global: dev/data/writing/ops
@@ -969,6 +976,11 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
         )
         session_records.append((session_first_prompt or "",
                                 session_premium_out, session_premium_cache_read))
+        if session_premium_cache_read >= MARATHON_CACHE_READ:
+            marathon_sessions += 1
+            marathon_cache += session_premium_cache_read
+            marathon_out += session_premium_out
+            marathon_top = max(marathon_top, session_premium_cache_read)
 
     # Pick top repeated prompts (recurring >= budget's recurring_min)
     recurring = [
@@ -999,6 +1011,13 @@ def scan(root: Path, max_age_days: int, cwd: Path | None = None,
             "sessions": auto_sessions,
             "out_tokens": auto_out,
             "cache_read_tokens": auto_cache,
+        },
+        "marathon_premium": {
+            "sessions": marathon_sessions,
+            "cache_read_tokens": marathon_cache,
+            "out_tokens": marathon_out,
+            "top_cache_read": marathon_top,
+            "threshold": MARATHON_CACHE_READ,
         },
     }
 

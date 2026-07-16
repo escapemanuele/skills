@@ -172,6 +172,10 @@ def compute_metrics(scan: dict) -> dict:
     model_saving_usd = round(
         auto_prem_out / 1e6 * (prem_out_price - haiku_out_price)
         + auto_prem_cache / 1e6 * (prem_cr_price - haiku_cr_price), 2)
+    marathon = mm.get("marathon_premium") or {}
+    marathon_sessions = _int(marathon.get("sessions"))
+    marathon_cache = _int(marathon.get("cache_read_tokens"))
+    marathon_top = _int(marathon.get("top_cache_read"))
 
     destructive = cs.get("destructive_cmds") or []
     risky_git = sum(_int(d.get("count")) for d in destructive if d.get("label") in RISKY_GIT_LABELS)
@@ -244,6 +248,9 @@ def compute_metrics(scan: dict) -> dict:
         "auto_prem_sessions": auto_prem_sessions,
         "auto_prem_out": auto_prem_out,
         "model_saving_usd": model_saving_usd,
+        "marathon_sessions": marathon_sessions,
+        "marathon_cache": marathon_cache,
+        "marathon_top": marathon_top,
         "recurring": recurring,
         "unsaved": unsaved,
         "unsaved_count": unsaved_count,
@@ -581,6 +588,31 @@ def build_coaching(m: dict) -> list[dict]:
             "better": 'Add --model (e.g. claude-haiku-4-5-20251001 or claude-sonnet-5) '
                       'to the scheduled claude -p invocation.',
             "handoff": _NO_INSTALL,
+        })
+
+    # Marathon sessions riding a premium context (cache reads are the cost)
+    if m.get("marathon_sessions", 0) >= 1:
+        n = m["marathon_sessions"]
+        word = "session" if n == 1 else "sessions"
+        orch = {"feature", "bug"} & set(m.get("installed", []))
+        if orch:
+            better = ("Delegate the grind: /feature and /bug run exploration, edits, and "
+                      "tests in cheaper-model subagents, so only planning and review ride "
+                      "the premium context.")
+        else:
+            better = ("Delegate mechanical work (exploring, editing, running tests) to "
+                      "subagents on a cheaper model — the premium context stays small; "
+                      "or switch /model for the grind stretches.")
+        cards.append({
+            "title": "Big sessions ride a premium context",
+            "hard_count": (f"{n} {word} with ≥50M premium cache-read tokens each "
+                           f"(largest {_fmt_tokens(m.get('marathon_top', 0))})"),
+            "saw": "Long coding sessions kept the whole working context on a top-tier "
+                   "model — every turn re-reads it at premium weight.",
+            "matters": "Cache reads dominate the cost of marathon sessions; that is what "
+                       "hits usage limits, not the answers themselves.",
+            "better": better,
+            "handoff": "orchestration (/feature, /bug)" if orch else _NO_INSTALL,
         })
 
     # Native-tool bypass (≥10% AND ≥30 calls)

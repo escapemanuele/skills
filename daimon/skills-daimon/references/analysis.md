@@ -81,6 +81,7 @@ Signals to build from (skip any under threshold):
 - **Raw HTTP to a tool-backed host** — for each `raw_http_hosts` entry with a known CLI/MCP (e.g. `teamcity.a8c.com` → `teamcity` CLI). Skip localhost / one-off hosts.
 - **Destructive commands** — surface riskiest from `destructive_cmds` (`git push --force`, `git reset --hard`, `--no-verify`) with count + safer alternative (`--force-with-lease`, `git revert`, fix the hook). Skip `rm -rf` against `/tmp`.
 - **Sleep-polling** — `sleep_calls` ≥ 5 → suggest a proper wait/background job.
+- **Marathon premium context** — `model_mix.marathon_premium.sessions` ≥ 1 (a session with ≥50M premium cache-read tokens). Cache reads dominate marathon-session cost. Fix: delegate mechanical work to cheaper-model subagents — name orchestration's `/feature`/`/bug` when the `feature`/`bug` skills are installed, else generic subagent/model-switch advice. Be honest that delegation raises total tokens while cutting premium-weighted ones.
 
 **Missing patterns:**
 - **Recurring prompt with no saved command** — `recurring_prompts` (count ≥ 3) with no matching `installed_skills`. Fix is a behavior change, no install: *"Just say: **\"save my <task> prompt as a slash command\"** — Claude Code writes the `~/.claude/commands/<name>.md` file natively."*

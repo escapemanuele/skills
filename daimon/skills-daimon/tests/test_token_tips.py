@@ -244,6 +244,44 @@ class TestModelMixMetrics(unittest.TestCase):
         self.assertEqual(row["verdict"], "watch")
 
 
+class TestMarathonCoaching(unittest.TestCase):
+    def _scan(self, sessions=2, installed=()):
+        return {
+            "session_count": 50,
+            "installed_skills": list(installed),
+            "model_mix": {
+                "by_model": {"opus": {"out": 1_000_000}},
+                "marathon_premium": {"sessions": sessions,
+                                     "cache_read_tokens": 300_000_000,
+                                     "out_tokens": 900_000,
+                                     "top_cache_read": 180_000_000,
+                                     "threshold": 50_000_000},
+            },
+        }
+
+    def _card(self, scan):
+        m = analyze.compute_metrics(scan)
+        cards = analyze.build_coaching(m)
+        return next((c for c in cards if "premium context" in c["title"]), None)
+
+    def test_card_present_with_orchestration_handoff(self):
+        card = self._card(self._scan(installed=("feature", "bug")))
+        self.assertIsNotNone(card)
+        self.assertIn("/feature", card["better"])
+        self.assertIn("orchestration", card["handoff"])
+        self.assertIn("180M", card["hard_count"])
+
+    def test_card_generic_without_orchestration(self):
+        card = self._card(self._scan())
+        self.assertIsNotNone(card)
+        self.assertNotIn("/feature", card["better"])
+        self.assertIn("subagents", card["better"])
+
+    def test_no_card_without_marathons(self):
+        card = self._card(self._scan(sessions=0))
+        self.assertIsNone(card)
+
+
 class TestSavingsBannerHtml(unittest.TestCase):
     def test_banner_rendered_when_present(self):
         html = rr.simple_token_block(
