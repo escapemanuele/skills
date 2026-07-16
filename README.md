@@ -77,8 +77,10 @@ Then use `/feature`, `/bug`, `/review` in any repo on your machine.
 Skill behavior is pinned with [unvibe](https://github.com/aaronfc/unvibe) — tiny pseudo-evals that poke each skill with scenario prompts and assert which tools Claude plans to call. Every skill folder carries an `EVALUATION.yaml`. Run one:
 
 ```bash
-uvx --from git+https://github.com/aaronfc/unvibe.git unvibe daimon/skills-daimon
+ANTHROPIC_MODEL=claude-sonnet-5 uvx --from git+https://github.com/aaronfc/unvibe.git unvibe daimon/skills-daimon
 ```
+
+Always pin a cheap model for eval runs — grading plans is mechanical work, and a full suite fires dozens of `claude -p` calls that otherwise burn your premium-model limits (~$150 API-equivalent per full run measured on the default model vs ~$10 on Haiku).
 
 ## Want the details?
 
